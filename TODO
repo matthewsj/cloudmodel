@@ -1,0 +1,8 @@
+[] Test offline
+[] Add a way to queue messages for sending if we're offline
+   - Should this be in JS or elm land?
+[] Display local error messages
+[] Figure out how to take local action (clear chat text) as well as make a proposal
+[] Document
+[] Rearrange the code to be more readable
+[] Factor out cloudmodel stuff into a library

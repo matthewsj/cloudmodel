@@ -12,27 +12,29 @@ io.on('connection', function(socket) {
     eventStream
   });
 
-  socket.on('propose', function(proposal) {
+  socket.on('propose', function(proposal, responseFn) {
     const latestEventId = eventStream.length;
-    const { latestEventIdBelief, proposedEvent, clientEventId } = proposal;
-    if (latestEventIdBelief === latestEventId) {
+    const { latestKnownEventId, sharedModelMsg, clientEventId } = proposal;
+    if (latestKnownEventId === latestEventId) {
       const newEventId = latestEventId + 1;
       const newEvent = {
-        eventId: newEventId,
-        event: proposedEvent
+        id: newEventId,
+        msg: sharedModelMsg
       };
       eventStream.push(newEvent);
-      socket.broadcast.emit('events', newEvent);
-      socket.emit('accept', {
-        clientEventId,
-        eventId: newEventId,
-        event: proposedEvent
+      socket.broadcast.emit('event', newEvent);
+      responseFn({
+        accept: {
+          clientEventId,
+          eventId: newEventId,
+        }
       });
     } else {
-      socket.emit('reject', {
-        clientEventId,
-        latestEventId: latestEventId,
-        missingEvents: eventStream.slice(-(latestEventId - latestEventIdBelief))
+      responseFn({
+        reject: {
+          clientEventId,
+          missingEvents: eventStream.slice(-(latestEventId - latestKnownEventId))
+        }
       });
     }
   });
