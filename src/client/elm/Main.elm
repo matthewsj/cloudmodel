@@ -1,4 +1,4 @@
-port module Main exposing (ClientEventId, ControlMsg(..), Event, EventId, LocalModel, LocalModelMsg(..), Model, Msg(..), SharedModel, SharedModelMsg(..), coreUpdate, decodeAccept, decodeEvent, decodeOrFail, decodeProposalResponse, decodeReject, decodeSharedModelMsg, encodeSharedModelMsg, init, initLocalModel, initSharedModel, main, predictedSharedModel, proposal, proposalResponse, proposeEvent, receiveEvent, subscriptions, update, updateAll, updateLocal, updateSharedLocalOrigin, updateSharedRemoteModelOrigin, updateWithControlMsg, view, viewSharedAndLocal)
+port module Main exposing (ClientEventId, ControlMsg(..), Event, EventId, LocalModel, LocalModelMsg(..), Model, Msg(..), SharedModel, SharedModelMsg(..), coreUpdate, decodeAccept, decodeEvent, decodeOrFail, decodeProposalResponse, decodeReject, decodeSharedModelMsg, encodeSharedModelMsg, init, initLocalModel, initSharedModel, main, predictedSharedModel, proposal, proposalResponse, proposeEvent, receiveEvents, subscriptions, update, updateAll, updateLocal, updateSharedLocalOrigin, updateSharedRemoteModelOrigin, updateWithControlMsg, view, viewSharedAndLocal)
 
 import Browser
 import Html exposing (Html, button, div, input, li, text, ul)
@@ -27,7 +27,7 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
         [ proposalResponse (decodeOrFail (Json.Decode.map ControlMsg decodeProposalResponse))
-        , receiveEvent (decodeOrFail (Json.Decode.map RemoteOrigin decodeEvent))
+        , receiveEvents (decodeOrFail (Json.Decode.map RemoteOrigin (Json.Decode.list decodeEvent)))
         ]
 
 
@@ -145,7 +145,7 @@ type alias Event =
 type Msg
     = LocalModelMsg LocalModelMsg
     | LocalOrigin SharedModelMsg
-    | RemoteOrigin Event
+    | RemoteOrigin (List Event)
     | ControlMsg ControlMsg
 
 
@@ -165,7 +165,7 @@ type ControlMsg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case Debug.log "message" msg of
+    case msg of
         LocalModelMsg localMsg ->
             let
                 ( localModel, cmds ) =
@@ -176,8 +176,10 @@ update msg model =
         LocalOrigin sharedModelMsg ->
             updateSharedLocalOrigin sharedModelMsg model
 
-        RemoteOrigin event ->
-            updateSharedRemoteModelOrigin event.msg event.id model
+        RemoteOrigin events ->
+            ( List.foldl updateSharedRemoteModelOrigin model events
+            , Cmd.none
+            )
 
         ControlMsg controlMsg ->
             updateWithControlMsg controlMsg model
@@ -217,14 +219,12 @@ updateSharedLocalOrigin msg model =
 -- TODO: Update this to be skeptical of whether the given event is really next
 
 
-updateSharedRemoteModelOrigin : SharedModelMsg -> Int -> Model -> ( Model, Cmd Msg )
-updateSharedRemoteModelOrigin msg eventId model =
-    ( { model
-        | latestKnownSharedModel = coreUpdate msg model.latestKnownSharedModel
-        , latestKnownEventId = eventId
-      }
-    , Cmd.none
-    )
+updateSharedRemoteModelOrigin : Event -> Model -> Model
+updateSharedRemoteModelOrigin event model =
+    { model
+        | latestKnownSharedModel = coreUpdate event.msg model.latestKnownSharedModel
+        , latestKnownEventId = event.id
+    }
 
 
 updateWithControlMsg : ControlMsg -> Model -> ( Model, Cmd Msg )
@@ -303,7 +303,7 @@ port proposal : Json.Encode.Value -> Cmd msg
 port proposalResponse : (Json.Decode.Value -> msg) -> Sub msg
 
 
-port receiveEvent : (Json.Decode.Value -> msg) -> Sub msg
+port receiveEvents : (Json.Decode.Value -> msg) -> Sub msg
 
 
 

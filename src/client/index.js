@@ -9,13 +9,11 @@ const socket = io();
 
 socket.on('catchup', (catchupMessage) => {
   const { eventStream } = catchupMessage;
-  eventStream.forEach((event) => {
-    app.ports.receiveEvent.send(event);
-  });
+  app.ports.receiveEvents.send(eventStream);
 });
 
 socket.on('event', (newEvent) => {
-  app.ports.receiveEvent.send(newEvent);
+  app.ports.receiveEvent.send([newEvent]);
 })
 
 app.ports.proposal.subscribe(function(event) {
