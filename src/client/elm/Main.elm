@@ -1,13 +1,14 @@
-port module Main exposing (..)
+port module Main exposing (ClientEventId, ControlMsg(..), Event, EventId, LocalModel, LocalModelMsg(..), Model, Msg(..), SharedModel, SharedModelMsg(..), coreUpdate, decodeAccept, decodeEvent, decodeOrFail, decodeProposalResponse, decodeReject, decodeSharedModelMsg, encodeSharedModelMsg, init, initLocalModel, initSharedModel, main, predictedSharedModel, proposal, proposalResponse, proposeEvent, receiveEvent, subscriptions, update, updateAll, updateLocal, updateSharedLocalOrigin, updateSharedRemoteModelOrigin, updateWithControlMsg, view, viewSharedAndLocal)
 
 import Browser
 import Html exposing (Html, button, div, input, li, text, ul)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput)
 import Http
-import Json.Decode exposing (Decoder, oneOf, field, succeed)
+import Json.Decode exposing (Decoder, field, oneOf, succeed)
 import Json.Decode.Pipeline exposing (required)
 import Json.Encode
+
 
 
 -- MAIN
@@ -69,15 +70,24 @@ decodeSharedModelMsg =
 decodeOrFail : Decoder Msg -> Json.Decode.Value -> Msg
 decodeOrFail decoder json =
     case Json.Decode.decodeValue decoder json of
-        Ok msg -> msg
-        Err error -> LocalModelMsg (DisplayError (Json.Decode.errorToString error))
+        Ok msg ->
+            msg
+
+        Err error ->
+            LocalModelMsg (DisplayError (Json.Decode.errorToString error))
+
 
 
 -- MODEL
 
-type alias EventId = Int
 
-type alias ClientEventId = Int
+type alias EventId =
+    Int
+
+
+type alias ClientEventId =
+    Int
+
 
 type alias Model =
     { latestKnownEventId : EventId
@@ -85,6 +95,7 @@ type alias Model =
     , pendingEvents : List Event
     , localModel : LocalModel
     }
+
 
 type alias SharedModel =
     { messages : List String
@@ -121,12 +132,15 @@ initLocalModel =
     }
 
 
+
 -- UPDATE
+
 
 type alias Event =
     { msg : SharedModelMsg
     , id : EventId
     }
+
 
 type Msg
     = LocalModelMsg LocalModelMsg
@@ -134,12 +148,15 @@ type Msg
     | RemoteOrigin Event
     | ControlMsg ControlMsg
 
+
 type SharedModelMsg
     = AddChat String
+
 
 type LocalModelMsg
     = ChangeDraft String
     | DisplayError String
+
 
 type ControlMsg
     = Accept EventId ClientEventId
@@ -148,11 +165,13 @@ type ControlMsg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case (Debug.log "message" msg) of
+    case Debug.log "message" msg of
         LocalModelMsg localMsg ->
-            let ( localModel, cmds ) = updateLocal localMsg model.localModel
+            let
+                ( localModel, cmds ) =
+                    updateLocal localMsg model.localModel
             in
-                ( { model | localModel = localModel }, cmds )
+            ( { model | localModel = localModel }, cmds )
 
         LocalOrigin sharedModelMsg ->
             updateSharedLocalOrigin sharedModelMsg model
@@ -169,64 +188,76 @@ updateLocal msg model =
     case msg of
         ChangeDraft draft ->
             ( { model | draft = draft }, Cmd.none )
+
         DisplayError error ->
             ( { model | errorMessage = Just error }, Cmd.none )
 
 
 updateSharedLocalOrigin : SharedModelMsg -> Model -> ( Model, Cmd Msg )
 updateSharedLocalOrigin msg model =
-    let newEvent = { msg = msg, id = 0 }
+    let
+        newEvent =
+            { msg = msg, id = 0 }
     in
-        case model.pendingEvents of
-            [] ->
-                ( { model | pendingEvents = [newEvent] }
-                , proposeEvent msg model.latestKnownEventId 0
-                )
-            _::_ ->
-                ( { model | pendingEvents = List.append model.pendingEvents [newEvent]
-                }
-                , Cmd.none
-                )
+    case model.pendingEvents of
+        [] ->
+            ( { model | pendingEvents = [ newEvent ] }
+            , proposeEvent msg model.latestKnownEventId 0
+            )
+
+        _ :: _ ->
+            ( { model
+                | pendingEvents = List.append model.pendingEvents [ newEvent ]
+              }
+            , Cmd.none
+            )
+
 
 
 -- TODO: Update this to be skeptical of whether the given event is really next
+
+
 updateSharedRemoteModelOrigin : SharedModelMsg -> Int -> Model -> ( Model, Cmd Msg )
 updateSharedRemoteModelOrigin msg eventId model =
     ( { model
-      | latestKnownSharedModel = coreUpdate msg model.latestKnownSharedModel
-      , latestKnownEventId = eventId
+        | latestKnownSharedModel = coreUpdate msg model.latestKnownSharedModel
+        , latestKnownEventId = eventId
       }
     , Cmd.none
     )
+
 
 updateWithControlMsg : ControlMsg -> Model -> ( Model, Cmd Msg )
 updateWithControlMsg controlMsg model =
     case controlMsg of
         Accept eventId clientEventId ->
             case model.pendingEvents of
-                (acceptedEvent::pendingEvents) ->
+                acceptedEvent :: pendingEvents ->
                     ( { model
-                    | latestKnownEventId = eventId
-                    , latestKnownSharedModel = coreUpdate acceptedEvent.msg model.latestKnownSharedModel
-                    , pendingEvents = pendingEvents
-                    }
+                        | latestKnownEventId = eventId
+                        , latestKnownSharedModel = coreUpdate acceptedEvent.msg model.latestKnownSharedModel
+                        , pendingEvents = pendingEvents
+                      }
                     , List.head pendingEvents
                         |> Maybe.map (\nextEventToSend -> proposeEvent nextEventToSend.msg eventId nextEventToSend.id)
                         |> Maybe.withDefault Cmd.none
                     )
+
                 _ ->
                     ( model, Cmd.none )
 
         Reject clientId newerEvents ->
-            let latest = List.head (List.reverse newerEvents)
+            let
+                latest =
+                    List.head (List.reverse newerEvents)
             in
-                ( { model
+            ( { model
                 | latestKnownEventId = Maybe.map .id latest |> Maybe.withDefault model.latestKnownEventId
                 , latestKnownSharedModel = updateAll (List.map .msg newerEvents) model.latestKnownSharedModel
                 , pendingEvents = []
-                }
-                , Cmd.none
-                )
+              }
+            , Cmd.none
+            )
 
 
 coreUpdate : SharedModelMsg -> SharedModel -> SharedModel
@@ -248,22 +279,22 @@ updateAll msgs model =
 
 proposeEvent : SharedModelMsg -> EventId -> ClientEventId -> Cmd Msg
 proposeEvent sharedModelMsg latestKnownEventId clientEventId =
-    proposal (
-        Json.Encode.object
-            [ ("sharedModelMsg", encodeSharedModelMsg sharedModelMsg)
-            , ("latestKnownEventId", Json.Encode.int latestKnownEventId)
-            , ("clientEventId", Json.Encode.int clientEventId)
+    proposal
+        (Json.Encode.object
+            [ ( "sharedModelMsg", encodeSharedModelMsg sharedModelMsg )
+            , ( "latestKnownEventId", Json.Encode.int latestKnownEventId )
+            , ( "clientEventId", Json.Encode.int clientEventId )
             ]
         )
+
 
 encodeSharedModelMsg : SharedModelMsg -> Json.Encode.Value
 encodeSharedModelMsg sharedModelMsg =
     case sharedModelMsg of
         AddChat string ->
             Json.Encode.object
-                [ ("addChat", Json.Encode.string string)
+                [ ( "addChat", Json.Encode.string string )
                 ]
-
 
 
 port proposal : Json.Encode.Value -> Cmd msg
@@ -273,6 +304,8 @@ port proposalResponse : (Json.Decode.Value -> msg) -> Sub msg
 
 
 port receiveEvent : (Json.Decode.Value -> msg) -> Sub msg
+
+
 
 -- VIEW
 
