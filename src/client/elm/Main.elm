@@ -74,7 +74,7 @@ decodeOrFail decoder json =
             msg
 
         Err error ->
-            LocalModelMsg (DisplayError (Json.Decode.errorToString error))
+            LocalOrigin (localAction (DisplayError (Json.Decode.errorToString error)))
 
 
 
@@ -142,11 +142,26 @@ type alias Event =
     }
 
 
+type alias LocalOriginAction =
+    { localMsg : Maybe LocalModelMsg
+    , proposedEvent : Maybe SharedModelMsg
+    }
+
+
 type Msg
-    = LocalModelMsg LocalModelMsg
-    | LocalOrigin SharedModelMsg
+    = LocalOrigin LocalOriginAction
     | RemoteOrigin (List Event)
     | ControlMsg ControlMsg
+
+
+localAction : LocalModelMsg -> LocalOriginAction
+localAction localMsg =
+    { localMsg = Just localMsg, proposedEvent = Nothing }
+
+
+sharedAction : SharedModelMsg -> LocalOriginAction
+sharedAction sharedModelMsg =
+    { localMsg = Nothing, proposedEvent = Just sharedModelMsg }
 
 
 type SharedModelMsg
@@ -166,15 +181,19 @@ type ControlMsg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        LocalModelMsg localMsg ->
+        LocalOrigin { localMsg, proposedEvent } ->
             let
-                ( localModel, cmds ) =
-                    updateLocal localMsg model.localModel
-            in
-            ( { model | localModel = localModel }, cmds )
+                ( newLocalModel, localCmd ) =
+                    Maybe.map (\l -> updateLocal l model.localModel) localMsg
+                        |> Maybe.withDefault ( model.localModel, Cmd.none )
 
-        LocalOrigin sharedModelMsg ->
-            updateSharedLocalOrigin sharedModelMsg model
+                ( newSharedModel, sharedCmd ) =
+                    Maybe.map (\s -> updateSharedLocalOrigin s model) proposedEvent
+                        |> Maybe.withDefault ( model, Cmd.none )
+            in
+            ( { newSharedModel | localModel = newLocalModel }
+            , Cmd.batch [ localCmd, sharedCmd ]
+            )
 
         RemoteOrigin events ->
             ( List.foldl updateSharedRemoteModelOrigin model events
@@ -312,17 +331,22 @@ port receiveEvents : (Json.Decode.Value -> msg) -> Sub msg
 
 view : Model -> Html Msg
 view model =
+    Html.map LocalOrigin (viewLocalOriginAction model)
+
+
+viewLocalOriginAction : Model -> Html LocalOriginAction
+viewLocalOriginAction model =
     viewSharedAndLocal (predictedSharedModel model) model.localModel
 
 
-viewSharedAndLocal : SharedModel -> LocalModel -> Html Msg
+viewSharedAndLocal : SharedModel -> LocalModel -> Html LocalOriginAction
 viewSharedAndLocal sharedModel localModel =
     div []
         [ ul [ id "messages" ] (List.map (\chat -> li [] [ text chat ]) sharedModel.messages)
         , div [ id "chatform" ]
-            [ input [ value localModel.draft, onInput (ChangeDraft >> LocalModelMsg) ] []
+            [ input [ value localModel.draft, onInput (ChangeDraft >> localAction) ] []
             , button
-                [ onClick (LocalOrigin (AddChat localModel.draft)) ]
+                [ onClick { localMsg = Just (ChangeDraft ""), proposedEvent = Just (AddChat localModel.draft) } ]
                 [ text "Send" ]
             ]
         ]
