@@ -98,7 +98,7 @@ type alias Model =
 
 
 type alias SharedModel =
-    { messages : List String
+    { chats : List String
     }
 
 
@@ -121,7 +121,7 @@ init _ =
 
 initSharedModel : SharedModel
 initSharedModel =
-    { messages = []
+    { chats = []
     }
 
 
@@ -283,7 +283,7 @@ coreUpdate : SharedModelMsg -> SharedModel -> SharedModel
 coreUpdate msg model =
     case msg of
         AddChat newChat ->
-            { model | messages = List.append model.messages [ newChat ] }
+            { model | chats = List.append model.chats [ newChat ] }
 
 
 predictedSharedModel : Model -> SharedModel
@@ -342,7 +342,7 @@ viewLocalOriginAction model =
 viewSharedAndLocal : SharedModel -> LocalModel -> Html LocalOriginAction
 viewSharedAndLocal sharedModel localModel =
     div []
-        [ ul [ id "messages" ] (List.map (\chat -> li [] [ text chat ]) sharedModel.messages)
+        [ ul [ id "messages" ] (List.map (\chat -> li [] [ text chat ]) sharedModel.chats)
         , div [ id "chatform" ]
             [ input [ value localModel.draft, onInput (ChangeDraft >> localAction) ] []
             , button
