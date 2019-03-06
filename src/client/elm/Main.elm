@@ -90,10 +90,15 @@ type alias ClientEventId =
 
 
 type alias Model =
+    { sharedModelInfo : SharedModelInfo
+    , localModel : LocalModel
+    }
+
+
+type alias SharedModelInfo =
     { latestKnownEventId : EventId
     , latestKnownSharedModel : SharedModel
     , pendingEvents : List Event
-    , localModel : LocalModel
     }
 
 
@@ -110,13 +115,19 @@ type alias LocalModel =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { latestKnownEventId = 0
-      , latestKnownSharedModel = initSharedModel
-      , pendingEvents = []
+    ( { sharedModelInfo = initSharedModelInfo
       , localModel = initLocalModel
       }
     , Cmd.none
     )
+
+
+initSharedModelInfo : SharedModelInfo
+initSharedModelInfo =
+    { latestKnownEventId = 0
+    , latestKnownSharedModel = initSharedModel
+    , pendingEvents = []
+    }
 
 
 initSharedModel : SharedModel
@@ -187,21 +198,28 @@ update msg model =
                     Maybe.map (\l -> updateLocal l model.localModel) localMsg
                         |> Maybe.withDefault ( model.localModel, Cmd.none )
 
-                ( newSharedModel, sharedCmd ) =
-                    Maybe.map (\s -> updateSharedLocalOrigin s model) proposedEvent
-                        |> Maybe.withDefault ( model, Cmd.none )
+                ( newSharedModelInfo, sharedCmd ) =
+                    Maybe.map (\s -> updateSharedLocalOrigin s model.sharedModelInfo) proposedEvent
+                        |> Maybe.withDefault ( model.sharedModelInfo, Cmd.none )
             in
-            ( { newSharedModel | localModel = newLocalModel }
+            ( { sharedModelInfo = newSharedModelInfo, localModel = newLocalModel }
             , Cmd.batch [ localCmd, sharedCmd ]
             )
 
         RemoteOrigin events ->
-            ( List.foldl updateSharedRemoteModelOrigin model events
+            ( { model
+                | sharedModelInfo =
+                    List.foldl updateSharedRemoteModelOrigin model.sharedModelInfo events
+              }
             , Cmd.none
             )
 
         ControlMsg controlMsg ->
-            updateWithControlMsg controlMsg model
+            let
+                ( sharedModelInfo, cmd ) =
+                    updateWithControlMsg controlMsg model.sharedModelInfo
+            in
+            ( { model | sharedModelInfo = sharedModelInfo }, cmd )
 
 
 updateLocal : LocalModelMsg -> LocalModel -> ( LocalModel, Cmd Msg )
@@ -214,7 +232,7 @@ updateLocal msg model =
             ( { model | errorMessage = Just error }, Cmd.none )
 
 
-updateSharedLocalOrigin : SharedModelMsg -> Model -> ( Model, Cmd Msg )
+updateSharedLocalOrigin : SharedModelMsg -> SharedModelInfo -> ( SharedModelInfo, Cmd Msg )
 updateSharedLocalOrigin msg model =
     let
         newEvent =
@@ -238,7 +256,7 @@ updateSharedLocalOrigin msg model =
 -- TODO: Update this to be skeptical of whether the given event is really next
 
 
-updateSharedRemoteModelOrigin : Event -> Model -> Model
+updateSharedRemoteModelOrigin : Event -> SharedModelInfo -> SharedModelInfo
 updateSharedRemoteModelOrigin event model =
     { model
         | latestKnownSharedModel = coreUpdate event.msg model.latestKnownSharedModel
@@ -246,7 +264,7 @@ updateSharedRemoteModelOrigin event model =
     }
 
 
-updateWithControlMsg : ControlMsg -> Model -> ( Model, Cmd Msg )
+updateWithControlMsg : ControlMsg -> SharedModelInfo -> ( SharedModelInfo, Cmd Msg )
 updateWithControlMsg controlMsg model =
     case controlMsg of
         Accept eventId clientEventId ->
@@ -286,7 +304,7 @@ coreUpdate msg model =
             { model | chats = List.append model.chats [ newChat ] }
 
 
-predictedSharedModel : Model -> SharedModel
+predictedSharedModel : SharedModelInfo -> SharedModel
 predictedSharedModel model =
     updateAll (List.map .msg model.pendingEvents) model.latestKnownSharedModel
 
@@ -336,7 +354,7 @@ view model =
 
 viewLocalOriginAction : Model -> Html LocalOriginAction
 viewLocalOriginAction model =
-    viewSharedAndLocal (predictedSharedModel model) model.localModel
+    viewSharedAndLocal (predictedSharedModel model.sharedModelInfo) model.localModel
 
 
 viewSharedAndLocal : SharedModel -> LocalModel -> Html LocalOriginAction
