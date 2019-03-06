@@ -13,7 +13,7 @@ socket.on('catchup', (catchupMessage) => {
 });
 
 socket.on('event', (newEvent) => {
-  app.ports.receiveEvent.send([newEvent]);
+  app.ports.receiveEvents.send([newEvent]);
 })
 
 app.ports.proposal.subscribe(function(event) {
