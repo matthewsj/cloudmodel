@@ -60,7 +60,7 @@ decodeEvent decodeSharedMsg =
         |> required "id" Json.Decode.int
 
 
-decodeSharedModelMsg : Decoder SharedModelMsg
+decodeSharedModelMsg : Decoder SharedChatMsg
 decodeSharedModelMsg =
     Json.Decode.oneOf
         [ succeed AddChat |> required "addChat" Json.Decode.string
@@ -79,6 +79,7 @@ decodeOrFail decoder json =
 
 
 -- MODEL
+-- generic model stuff
 
 
 type alias EventId =
@@ -102,16 +103,20 @@ type alias SharedModelInfo sharedModel sharedModelMsg =
     }
 
 
+
+-- chat-specific model stuff
+
+
 type alias Model =
-    CloudModel SharedModel SharedModelMsg LocalModel
+    CloudModel SharedChatModel SharedChatMsg LocalChatModel
 
 
-type alias SharedModel =
+type alias SharedChatModel =
     { chats : List String
     }
 
 
-type alias LocalModel =
+type alias LocalChatModel =
     { draft : String
     , errorMessage : Maybe String
     }
@@ -134,13 +139,13 @@ initSharedModelInfo initLatestKnownSharedModel =
     }
 
 
-initSharedModel : SharedModel
+initSharedModel : SharedChatModel
 initSharedModel =
     { chats = []
     }
 
 
-initLocalModel : LocalModel
+initLocalModel : LocalChatModel
 initLocalModel =
     { draft = ""
     , errorMessage = Nothing
@@ -149,6 +154,7 @@ initLocalModel =
 
 
 -- UPDATE
+-- generic update stuff
 
 
 type alias Event sharedModelMsg =
@@ -169,12 +175,9 @@ type CloudMsg sharedModelMsg localModelMsg
     | ControlMsg (ControlMsg sharedModelMsg)
 
 
-type alias Msg =
-    CloudMsg SharedModelMsg LocalModelMsg
-
-
-type alias ChatAction =
-    LocalOriginAction SharedModelMsg LocalModelMsg
+type ControlMsg sharedModelMsg
+    = Accept EventId ClientEventId
+    | Reject ClientEventId (List (Event sharedModelMsg))
 
 
 localAction : localModelMsg -> LocalOriginAction sharedModelMsg localModelMsg
@@ -185,25 +188,6 @@ localAction localMsg =
 sharedAction : sharedModelMsg -> LocalOriginAction sharedModelMsg localModelMsg
 sharedAction sharedModelMsg =
     { localMsg = Nothing, proposedEvent = Just sharedModelMsg }
-
-
-type SharedModelMsg
-    = AddChat String
-
-
-type LocalModelMsg
-    = ChangeDraft String
-    | DisplayError String
-
-
-type ControlMsg sharedModelMsg
-    = Accept EventId ClientEventId
-    | Reject ClientEventId (List (Event sharedModelMsg))
-
-
-update : Msg -> Model -> ( Model, Cmd Msg )
-update =
-    constructCloudUpdate encodeSharedModelMsg coreUpdate updateLocal
 
 
 constructCloudUpdate :
@@ -273,7 +257,11 @@ updateSharedLocalOrigin sharedModelMsgEncoder msg model =
 -- TODO: Update this to be skeptical of whether the given event is really next
 
 
-updateSharedRemoteModelOrigin : (sharedModelMsg -> sharedModel -> sharedModel) -> Event sharedModelMsg -> SharedModelInfo sharedModel sharedModelMsg -> SharedModelInfo sharedModel sharedModelMsg
+updateSharedRemoteModelOrigin :
+    (sharedModelMsg -> sharedModel -> sharedModel)
+    -> Event sharedModelMsg
+    -> SharedModelInfo sharedModel sharedModelMsg
+    -> SharedModelInfo sharedModel sharedModelMsg
 updateSharedRemoteModelOrigin coreUpdateFn event model =
     { model
         | latestKnownSharedModel = coreUpdateFn event.msg model.latestKnownSharedModel
@@ -319,23 +307,6 @@ updateWithControlMsg sharedModelMsgEncoder coreUpdateFn controlMsg model =
             )
 
 
-updateLocal : LocalModelMsg -> LocalModel -> ( LocalModel, Cmd msg )
-updateLocal msg model =
-    case msg of
-        ChangeDraft draft ->
-            ( { model | draft = draft }, Cmd.none )
-
-        DisplayError error ->
-            ( { model | errorMessage = Just error }, Cmd.none )
-
-
-coreUpdate : SharedModelMsg -> SharedModel -> SharedModel
-coreUpdate msg model =
-    case msg of
-        AddChat newChat ->
-            { model | chats = List.append model.chats [ newChat ] }
-
-
 predictedSharedModel : (sharedModelMsg -> sharedModel -> sharedModel) -> SharedModelInfo sharedModel sharedModelMsg -> sharedModel
 predictedSharedModel coreUpdateFn model =
     List.foldl coreUpdateFn model.latestKnownSharedModel (List.map .msg model.pendingEvents)
@@ -357,7 +328,50 @@ proposeEvent sharedModelMsgEncoder sharedModelMsg latestKnownEventId clientEvent
         )
 
 
-encodeSharedModelMsg : SharedModelMsg -> Json.Encode.Value
+
+-- Chat's specific update messages and functions
+
+
+type alias Msg =
+    CloudMsg SharedChatMsg LocalChatMsg
+
+
+type alias ChatAction =
+    LocalOriginAction SharedChatMsg LocalChatMsg
+
+
+type SharedChatMsg
+    = AddChat String
+
+
+type LocalChatMsg
+    = ChangeDraft String
+    | DisplayError String
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update =
+    constructCloudUpdate encodeSharedModelMsg updateChatShared updateChatLocal
+
+
+updateChatLocal : LocalChatMsg -> LocalChatModel -> ( LocalChatModel, Cmd msg )
+updateChatLocal msg model =
+    case msg of
+        ChangeDraft draft ->
+            ( { model | draft = draft }, Cmd.none )
+
+        DisplayError error ->
+            ( { model | errorMessage = Just error }, Cmd.none )
+
+
+updateChatShared : SharedChatMsg -> SharedChatModel -> SharedChatModel
+updateChatShared msg model =
+    case msg of
+        AddChat newChat ->
+            { model | chats = List.append model.chats [ newChat ] }
+
+
+encodeSharedModelMsg : SharedChatMsg -> Json.Encode.Value
 encodeSharedModelMsg sharedModelMsg =
     case sharedModelMsg of
         AddChat string ->
@@ -396,10 +410,10 @@ constructCloudView updateFn viewFn model =
 
 view : Model -> Html Msg
 view =
-    constructCloudView coreUpdate chatView
+    constructCloudView updateChatShared chatView
 
 
-chatView : SharedModel -> LocalModel -> Html ChatAction
+chatView : SharedChatModel -> LocalChatModel -> Html ChatAction
 chatView sharedModel localModel =
     div []
         [ ul [ id "messages" ] (List.map (\chat -> li [] [ text chat ]) sharedModel.chats)
