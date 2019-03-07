@@ -1,4 +1,4 @@
-port module Main exposing (ClientEventId, ControlMsg(..), Event, EventId, LocalModel, LocalModelMsg(..), Model, Msg(..), SharedModel, SharedModelMsg(..), coreUpdate, decodeAccept, decodeEvent, decodeOrFail, decodeProposalResponse, decodeReject, decodeSharedModelMsg, encodeSharedModelMsg, init, initLocalModel, initSharedModel, main, predictedSharedModel, proposal, proposalResponse, proposeEvent, receiveEvents, subscriptions, update, updateAll, updateLocal, updateSharedLocalOrigin, updateSharedRemoteModelOrigin, updateWithControlMsg, view, viewSharedAndLocal)
+port module Main exposing (main)
 
 import Browser
 import Html exposing (Html, button, div, input, li, text, ul)
@@ -26,37 +26,37 @@ main =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ proposalResponse (decodeOrFail (Json.Decode.map ControlMsg decodeProposalResponse))
-        , receiveEvents (decodeOrFail (Json.Decode.map RemoteOrigin (Json.Decode.list decodeEvent)))
+        [ proposalResponse (decodeOrFail (Json.Decode.map ControlMsg (decodeProposalResponse decodeSharedModelMsg)))
+        , receiveEvents (decodeOrFail (Json.Decode.map RemoteOrigin (Json.Decode.list (decodeEvent decodeSharedModelMsg))))
         ]
 
 
-decodeProposalResponse : Decoder ControlMsg
-decodeProposalResponse =
+decodeProposalResponse : Decoder sharedModelMsg -> Decoder (ControlMsg sharedModelMsg)
+decodeProposalResponse decodeSharedMsg =
     oneOf
         [ field "accept" decodeAccept
-        , field "reject" decodeReject
+        , field "reject" (decodeReject decodeSharedMsg)
         ]
 
 
-decodeAccept : Decoder ControlMsg
+decodeAccept : Decoder (ControlMsg sharedModelMsg)
 decodeAccept =
     succeed Accept
         |> required "eventId" Json.Decode.int
         |> required "clientEventId" Json.Decode.int
 
 
-decodeReject : Decoder ControlMsg
-decodeReject =
+decodeReject : Decoder sharedModelMsg -> Decoder (ControlMsg sharedModelMsg)
+decodeReject decodeSharedMsg =
     succeed Reject
         |> required "clientEventId" Json.Decode.int
-        |> required "missingEvents" (Json.Decode.list decodeEvent)
+        |> required "missingEvents" (Json.Decode.list (decodeEvent decodeSharedMsg))
 
 
-decodeEvent : Decoder Event
-decodeEvent =
+decodeEvent : Decoder sharedModelMsg -> Decoder (Event sharedModelMsg)
+decodeEvent decodeSharedMsg =
     succeed Event
-        |> required "msg" decodeSharedModelMsg
+        |> required "msg" decodeSharedMsg
         |> required "id" Json.Decode.int
 
 
@@ -89,17 +89,21 @@ type alias ClientEventId =
     Int
 
 
-type alias Model =
-    { sharedModelInfo : SharedModelInfo
-    , localModel : LocalModel
+type alias CloudModel sharedModel sharedModelMsg localModel =
+    { sharedModelInfo : SharedModelInfo sharedModel sharedModelMsg
+    , localModel : localModel
     }
 
 
-type alias SharedModelInfo =
+type alias SharedModelInfo sharedModel sharedModelMsg =
     { latestKnownEventId : EventId
-    , latestKnownSharedModel : SharedModel
-    , pendingEvents : List Event
+    , latestKnownSharedModel : sharedModel
+    , pendingEvents : List (Event sharedModelMsg)
     }
+
+
+type alias Model =
+    CloudModel SharedModel SharedModelMsg LocalModel
 
 
 type alias SharedModel =
@@ -115,17 +119,17 @@ type alias LocalModel =
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { sharedModelInfo = initSharedModelInfo
+    ( { sharedModelInfo = initSharedModelInfo initSharedModel
       , localModel = initLocalModel
       }
     , Cmd.none
     )
 
 
-initSharedModelInfo : SharedModelInfo
-initSharedModelInfo =
+initSharedModelInfo : sharedModel -> SharedModelInfo sharedModel sharedModelMsg
+initSharedModelInfo initLatestKnownSharedModel =
     { latestKnownEventId = 0
-    , latestKnownSharedModel = initSharedModel
+    , latestKnownSharedModel = initLatestKnownSharedModel
     , pendingEvents = []
     }
 
@@ -147,30 +151,38 @@ initLocalModel =
 -- UPDATE
 
 
-type alias Event =
-    { msg : SharedModelMsg
+type alias Event sharedModelMsg =
+    { msg : sharedModelMsg
     , id : EventId
     }
 
 
-type alias LocalOriginAction =
-    { localMsg : Maybe LocalModelMsg
-    , proposedEvent : Maybe SharedModelMsg
+type alias LocalOriginAction sharedModelMsg localModelMsg =
+    { localMsg : Maybe localModelMsg
+    , proposedEvent : Maybe sharedModelMsg
     }
 
 
-type Msg
-    = LocalOrigin LocalOriginAction
-    | RemoteOrigin (List Event)
-    | ControlMsg ControlMsg
+type CloudMsg sharedModelMsg localModelMsg
+    = LocalOrigin (LocalOriginAction sharedModelMsg localModelMsg)
+    | RemoteOrigin (List (Event sharedModelMsg))
+    | ControlMsg (ControlMsg sharedModelMsg)
 
 
-localAction : LocalModelMsg -> LocalOriginAction
+type alias Msg =
+    CloudMsg SharedModelMsg LocalModelMsg
+
+
+type alias ChatAction =
+    LocalOriginAction SharedModelMsg LocalModelMsg
+
+
+localAction : localModelMsg -> LocalOriginAction sharedModelMsg localModelMsg
 localAction localMsg =
     { localMsg = Just localMsg, proposedEvent = Nothing }
 
 
-sharedAction : SharedModelMsg -> LocalOriginAction
+sharedAction : sharedModelMsg -> LocalOriginAction sharedModelMsg localModelMsg
 sharedAction sharedModelMsg =
     { localMsg = Nothing, proposedEvent = Just sharedModelMsg }
 
@@ -184,32 +196,43 @@ type LocalModelMsg
     | DisplayError String
 
 
-type ControlMsg
+type ControlMsg sharedModelMsg
     = Accept EventId ClientEventId
-    | Reject ClientEventId (List Event)
+    | Reject ClientEventId (List (Event sharedModelMsg))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update =
+    constructCloudUpdate encodeSharedModelMsg coreUpdate updateLocal
+
+
+constructCloudUpdate :
+    (sharedModelMsg -> Json.Encode.Value)
+    -> (sharedModelMsg -> sharedModel -> sharedModel)
+    -> (localModelMsg -> localModel -> ( localModel, Cmd localModelMsg ))
+    -> CloudMsg sharedModelMsg localModelMsg
+    -> CloudModel sharedModel sharedModelMsg localModel
+    -> ( CloudModel sharedModel sharedModelMsg localModel, Cmd (CloudMsg sharedModelMsg localModelMsg) )
+constructCloudUpdate sharedModelMsgEncoder coreUpdateFn updateLocalFn msg model =
     case msg of
         LocalOrigin { localMsg, proposedEvent } ->
             let
                 ( newLocalModel, localCmd ) =
-                    Maybe.map (\l -> updateLocal l model.localModel) localMsg
+                    Maybe.map (\l -> updateLocalFn l model.localModel) localMsg
                         |> Maybe.withDefault ( model.localModel, Cmd.none )
 
                 ( newSharedModelInfo, sharedCmd ) =
-                    Maybe.map (\s -> updateSharedLocalOrigin s model.sharedModelInfo) proposedEvent
+                    Maybe.map (\s -> updateSharedLocalOrigin sharedModelMsgEncoder s model.sharedModelInfo) proposedEvent
                         |> Maybe.withDefault ( model.sharedModelInfo, Cmd.none )
             in
             ( { sharedModelInfo = newSharedModelInfo, localModel = newLocalModel }
-            , Cmd.batch [ localCmd, sharedCmd ]
+            , Cmd.batch [ Cmd.map (localAction >> LocalOrigin) localCmd, sharedCmd ]
             )
 
         RemoteOrigin events ->
             ( { model
                 | sharedModelInfo =
-                    List.foldl updateSharedRemoteModelOrigin model.sharedModelInfo events
+                    List.foldl (updateSharedRemoteModelOrigin coreUpdateFn) model.sharedModelInfo events
               }
             , Cmd.none
             )
@@ -217,23 +240,17 @@ update msg model =
         ControlMsg controlMsg ->
             let
                 ( sharedModelInfo, cmd ) =
-                    updateWithControlMsg controlMsg model.sharedModelInfo
+                    updateWithControlMsg sharedModelMsgEncoder coreUpdateFn controlMsg model.sharedModelInfo
             in
             ( { model | sharedModelInfo = sharedModelInfo }, cmd )
 
 
-updateLocal : LocalModelMsg -> LocalModel -> ( LocalModel, Cmd Msg )
-updateLocal msg model =
-    case msg of
-        ChangeDraft draft ->
-            ( { model | draft = draft }, Cmd.none )
-
-        DisplayError error ->
-            ( { model | errorMessage = Just error }, Cmd.none )
-
-
-updateSharedLocalOrigin : SharedModelMsg -> SharedModelInfo -> ( SharedModelInfo, Cmd Msg )
-updateSharedLocalOrigin msg model =
+updateSharedLocalOrigin :
+    (sharedModelMsg -> Json.Encode.Value)
+    -> sharedModelMsg
+    -> SharedModelInfo sharedModel sharedModelMsg
+    -> ( SharedModelInfo sharedModel sharedModelMsg, Cmd (CloudMsg sharedModelMsg localModelMsg) )
+updateSharedLocalOrigin sharedModelMsgEncoder msg model =
     let
         newEvent =
             { msg = msg, id = 0 }
@@ -241,7 +258,7 @@ updateSharedLocalOrigin msg model =
     case model.pendingEvents of
         [] ->
             ( { model | pendingEvents = [ newEvent ] }
-            , proposeEvent msg model.latestKnownEventId 0
+            , proposeEvent sharedModelMsgEncoder msg model.latestKnownEventId 0
             )
 
         _ :: _ ->
@@ -256,27 +273,32 @@ updateSharedLocalOrigin msg model =
 -- TODO: Update this to be skeptical of whether the given event is really next
 
 
-updateSharedRemoteModelOrigin : Event -> SharedModelInfo -> SharedModelInfo
-updateSharedRemoteModelOrigin event model =
+updateSharedRemoteModelOrigin : (sharedModelMsg -> sharedModel -> sharedModel) -> Event sharedModelMsg -> SharedModelInfo sharedModel sharedModelMsg -> SharedModelInfo sharedModel sharedModelMsg
+updateSharedRemoteModelOrigin coreUpdateFn event model =
     { model
-        | latestKnownSharedModel = coreUpdate event.msg model.latestKnownSharedModel
+        | latestKnownSharedModel = coreUpdateFn event.msg model.latestKnownSharedModel
         , latestKnownEventId = event.id
     }
 
 
-updateWithControlMsg : ControlMsg -> SharedModelInfo -> ( SharedModelInfo, Cmd Msg )
-updateWithControlMsg controlMsg model =
+updateWithControlMsg :
+    (sharedModelMsg -> Json.Encode.Value)
+    -> (sharedModelMsg -> sharedModel -> sharedModel)
+    -> ControlMsg sharedModelMsg
+    -> SharedModelInfo sharedModel sharedModelMsg
+    -> ( SharedModelInfo sharedModel sharedModelMsg, Cmd (CloudMsg sharedModelMsg localModelMsg) )
+updateWithControlMsg sharedModelMsgEncoder coreUpdateFn controlMsg model =
     case controlMsg of
         Accept eventId clientEventId ->
             case model.pendingEvents of
                 acceptedEvent :: pendingEvents ->
                     ( { model
                         | latestKnownEventId = eventId
-                        , latestKnownSharedModel = coreUpdate acceptedEvent.msg model.latestKnownSharedModel
+                        , latestKnownSharedModel = coreUpdateFn acceptedEvent.msg model.latestKnownSharedModel
                         , pendingEvents = pendingEvents
                       }
                     , List.head pendingEvents
-                        |> Maybe.map (\nextEventToSend -> proposeEvent nextEventToSend.msg eventId nextEventToSend.id)
+                        |> Maybe.map (\nextEventToSend -> proposeEvent sharedModelMsgEncoder nextEventToSend.msg eventId nextEventToSend.id)
                         |> Maybe.withDefault Cmd.none
                     )
 
@@ -290,11 +312,21 @@ updateWithControlMsg controlMsg model =
             in
             ( { model
                 | latestKnownEventId = Maybe.map .id latest |> Maybe.withDefault model.latestKnownEventId
-                , latestKnownSharedModel = updateAll (List.map .msg newerEvents) model.latestKnownSharedModel
+                , latestKnownSharedModel = List.foldl coreUpdateFn model.latestKnownSharedModel (List.map .msg newerEvents)
                 , pendingEvents = []
               }
             , Cmd.none
             )
+
+
+updateLocal : LocalModelMsg -> LocalModel -> ( LocalModel, Cmd msg )
+updateLocal msg model =
+    case msg of
+        ChangeDraft draft ->
+            ( { model | draft = draft }, Cmd.none )
+
+        DisplayError error ->
+            ( { model | errorMessage = Just error }, Cmd.none )
 
 
 coreUpdate : SharedModelMsg -> SharedModel -> SharedModel
@@ -304,21 +336,21 @@ coreUpdate msg model =
             { model | chats = List.append model.chats [ newChat ] }
 
 
-predictedSharedModel : SharedModelInfo -> SharedModel
-predictedSharedModel model =
-    updateAll (List.map .msg model.pendingEvents) model.latestKnownSharedModel
+predictedSharedModel : (sharedModelMsg -> sharedModel -> sharedModel) -> SharedModelInfo sharedModel sharedModelMsg -> sharedModel
+predictedSharedModel coreUpdateFn model =
+    List.foldl coreUpdateFn model.latestKnownSharedModel (List.map .msg model.pendingEvents)
 
 
-updateAll : List SharedModelMsg -> SharedModel -> SharedModel
-updateAll msgs model =
-    List.foldl coreUpdate model msgs
-
-
-proposeEvent : SharedModelMsg -> EventId -> ClientEventId -> Cmd Msg
-proposeEvent sharedModelMsg latestKnownEventId clientEventId =
+proposeEvent :
+    (sharedModelMsg -> Json.Encode.Value)
+    -> sharedModelMsg
+    -> EventId
+    -> ClientEventId
+    -> Cmd (CloudMsg sharedModelMsg localModelMsg)
+proposeEvent sharedModelMsgEncoder sharedModelMsg latestKnownEventId clientEventId =
     proposal
         (Json.Encode.object
-            [ ( "sharedModelMsg", encodeSharedModelMsg sharedModelMsg )
+            [ ( "sharedModelMsg", sharedModelMsgEncoder sharedModelMsg )
             , ( "latestKnownEventId", Json.Encode.int latestKnownEventId )
             , ( "clientEventId", Json.Encode.int clientEventId )
             ]
@@ -345,20 +377,30 @@ port receiveEvents : (Json.Decode.Value -> msg) -> Sub msg
 
 
 -- VIEW
+-- generic library stuff
+
+
+constructCloudView :
+    (sharedModelMsg -> sharedModel -> sharedModel)
+    -> (sharedModel -> localModel -> Html (LocalOriginAction sharedModelMsg localModelMsg))
+    -> CloudModel sharedModel sharedModelMsg localModel
+    -> Html (CloudMsg sharedModelMsg localModelMsg)
+constructCloudView updateFn viewFn model =
+    viewFn (predictedSharedModel updateFn model.sharedModelInfo) model.localModel
+        |> Html.map LocalOrigin
+
+
+
+-- Chat's specific view
 
 
 view : Model -> Html Msg
-view model =
-    Html.map LocalOrigin (viewLocalOriginAction model)
+view =
+    constructCloudView coreUpdate chatView
 
 
-viewLocalOriginAction : Model -> Html LocalOriginAction
-viewLocalOriginAction model =
-    viewSharedAndLocal (predictedSharedModel model.sharedModelInfo) model.localModel
-
-
-viewSharedAndLocal : SharedModel -> LocalModel -> Html LocalOriginAction
-viewSharedAndLocal sharedModel localModel =
+chatView : SharedModel -> LocalModel -> Html ChatAction
+chatView sharedModel localModel =
     div []
         [ ul [ id "messages" ] (List.map (\chat -> li [] [ text chat ]) sharedModel.chats)
         , div [ id "chatform" ]
