@@ -122,12 +122,23 @@ type alias LocalChatModel =
     }
 
 
-init : () -> ( Model, Cmd Msg )
-init _ =
-    ( { sharedModelInfo = initSharedModelInfo initSharedModel
-      , localModel = initLocalModel
+
+-- generic init stuff
+
+
+buildInit :
+    (flags -> ( sharedModel, localModel, Cmd localModelMsg ))
+    -> flags
+    -> ( CloudModel sharedModel sharedModelMsg localModel, Cmd (CloudMsg sharedModelMsg localModelMsg) )
+buildInit clientInit flags =
+    let
+        ( initialClientSharedModel, initialClientLocalModel, cmd ) =
+            clientInit flags
+    in
+    ( { localModel = initialClientLocalModel
+      , sharedModelInfo = initSharedModelInfo initialClientSharedModel
       }
-    , Cmd.none
+    , Cmd.map (LocalOrigin << localAction) cmd
     )
 
 
@@ -139,14 +150,31 @@ initSharedModelInfo initLatestKnownSharedModel =
     }
 
 
-initSharedModel : SharedChatModel
-initSharedModel =
+
+-- chat-specific init stuff
+
+
+init : () -> ( Model, Cmd Msg )
+init =
+    buildInit chatInit
+
+
+chatInit : () -> ( SharedChatModel, LocalChatModel, Cmd LocalChatMsg )
+chatInit flags =
+    ( initSharedChatModel
+    , initLocalChatModel
+    , Cmd.none
+    )
+
+
+initSharedChatModel : SharedChatModel
+initSharedChatModel =
     { chats = []
     }
 
 
-initLocalModel : LocalChatModel
-initLocalModel =
+initLocalChatModel : LocalChatModel
+initLocalChatModel =
     { draft = ""
     , errorMessage = Nothing
     }
