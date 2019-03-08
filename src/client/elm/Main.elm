@@ -23,11 +23,29 @@ main =
         }
 
 
-subscriptions : Model -> Sub Msg
-subscriptions model =
+
+-- SUBSCRIPTIONS
+-- Generic subscription stuff
+
+
+buildSubscriptions :
+    Json.Decode.Decoder sharedModelMsg
+    -> (String -> localModelMsg)
+    -> (sharedModel -> localModel -> Sub localModelMsg)
+    -> CloudModel sharedModel sharedModelMsg localModel
+    -> Sub (CloudMsg sharedModelMsg localModelMsg)
+buildSubscriptions sharedMsgDecoder displayErrorFn subscriptionFn { sharedModelInfo, localModel } =
+    let
+        localSubscriptions =
+            subscriptionFn sharedModelInfo.latestKnownSharedModel localModel
+
+        handleDecodeFailure errorMessage =
+            LocalOrigin (localAction (displayErrorFn errorMessage))
+    in
     Sub.batch
-        [ proposalResponse (decodeOrFail (Json.Decode.map ControlMsg (decodeProposalResponse decodeSharedModelMsg)))
-        , receiveEvents (decodeOrFail (Json.Decode.map RemoteOrigin (Json.Decode.list (decodeEvent decodeSharedModelMsg))))
+        [ proposalResponse (decodeOrFail handleDecodeFailure (Json.Decode.map ControlMsg (decodeProposalResponse sharedMsgDecoder)))
+        , receiveEvents (decodeOrFail handleDecodeFailure (Json.Decode.map RemoteOrigin (Json.Decode.list (decodeEvent sharedMsgDecoder))))
+        , Sub.map (LocalOrigin << localAction) localSubscriptions
         ]
 
 
@@ -60,21 +78,30 @@ decodeEvent decodeSharedMsg =
         |> required "id" Json.Decode.int
 
 
-decodeSharedModelMsg : Decoder SharedChatMsg
-decodeSharedModelMsg =
-    Json.Decode.oneOf
-        [ succeed AddChat |> required "addChat" Json.Decode.string
-        ]
-
-
-decodeOrFail : Decoder Msg -> Json.Decode.Value -> Msg
-decodeOrFail decoder json =
+decodeOrFail : (String -> msg) -> Decoder msg -> Json.Decode.Value -> msg
+decodeOrFail onError decoder json =
     case Json.Decode.decodeValue decoder json of
         Ok msg ->
             msg
 
         Err error ->
-            LocalOrigin (localAction (DisplayError (Json.Decode.errorToString error)))
+            onError (Json.Decode.errorToString error)
+
+
+
+-- chat-specific model stuff
+
+
+subscriptions : Model -> Sub Msg
+subscriptions =
+    buildSubscriptions decodeSharedModelMsg DisplayError (\_ _ -> Sub.none)
+
+
+decodeSharedModelMsg : Decoder SharedChatMsg
+decodeSharedModelMsg =
+    Json.Decode.oneOf
+        [ succeed AddChat |> required "addChat" Json.Decode.string
+        ]
 
 
 
