@@ -15,8 +15,8 @@ import Json.Encode
 
 main =
     CloudModel.element
-        { sharedModelMsgDecoder = decodeSharedMsg
-        , sharedModelMsgEncoder = encodeSharedMsg
+        { sharedMsgDecoder = decodeSharedMsg
+        , sharedMsgEncoder = encodeSharedMsg
         , displayError = DisplayError
         , init = init
         , updateCloud = updateShared

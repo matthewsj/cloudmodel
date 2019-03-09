@@ -1,8 +1,7 @@
-module CloudModel exposing (CloudModelConfig, LocalOriginAction, element, localAction, sharedAction)
+module CloudModel exposing (CloudModel, CloudModelConfig, CloudMsg, LocalOriginAction, element, localAction, sharedAction, wrapAll)
 
 import Browser
 import Html exposing (Html)
-import Http
 import Json.Decode exposing (Decoder, field, oneOf, succeed)
 import Json.Decode.Pipeline exposing (required)
 import Json.Encode
@@ -18,25 +17,52 @@ type alias CloudModelConfig sharedModel localModel sharedMsg localMsg flags =
     , subscriptions : sharedModel -> localModel -> Sub localMsg
     , view : sharedModel -> localModel -> Html (LocalOriginAction sharedMsg localMsg)
     , proposal : Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg)
-    , proposalResponse : (Json.Decode.Value -> CloudMsg sharedMsg localMsg) -> Sub (CloudMsg sharedMsg localMsg)
-    , receiveEvents : (Json.Decode.Value -> CloudMsg sharedMsg localMsg) -> Sub (CloudMsg sharedMsg localMsg)
+    , proposalResponse :
+        (Json.Decode.Value -> CloudMsg sharedMsg localMsg)
+        -> Sub (CloudMsg sharedMsg localMsg)
+    , receiveEvents :
+        (Json.Decode.Value -> CloudMsg sharedMsg localMsg)
+        -> Sub (CloudMsg sharedMsg localMsg)
     }
 
 
 element :
     CloudModelConfig sharedModel localModel sharedMsg localMsg flags
     -> Program flags (CloudModel sharedModel sharedMsg localModel) (CloudMsg sharedMsg localMsg)
-element { sharedMsgDecoder, sharedMsgEncoder, displayError, init, updateCloud, updateLocal, subscriptions, view, proposal, proposalResponse, receiveEvents } =
-    Browser.element
-        { init = buildInit init
-        , update =
-            constructCloudUpdate proposal
-                sharedMsgEncoder
-                updateCloud
-                updateLocal
-        , subscriptions = buildSubscriptions proposalResponse receiveEvents sharedMsgDecoder displayError subscriptions
-        , view = constructCloudView updateCloud view
+element cloudModelConfig =
+    Browser.element (wrapAll cloudModelConfig)
+
+
+wrapAll :
+    CloudModelConfig sharedModel localModel sharedMsg localMsg flags
+    ->
+        { init :
+            flags
+            -> ( CloudModel sharedModel sharedMsg localModel, Cmd (CloudMsg sharedMsg localMsg) )
+        , update :
+            CloudMsg sharedMsg localMsg
+            -> CloudModel sharedModel sharedMsg localModel
+            -> ( CloudModel sharedModel sharedMsg localModel, Cmd (CloudMsg sharedMsg localMsg) )
+        , subscriptions :
+            CloudModel sharedModel sharedMsg localModel
+            -> Sub (CloudMsg sharedMsg localMsg)
+        , view : CloudModel sharedModel sharedMsg localModel -> Html (CloudMsg sharedMsg localMsg)
         }
+wrapAll { sharedMsgDecoder, sharedMsgEncoder, displayError, init, updateCloud, updateLocal, subscriptions, view, proposal, proposalResponse, receiveEvents } =
+    { init = buildInit init
+    , update =
+        buildCloudUpdate proposal
+            sharedMsgEncoder
+            updateCloud
+            updateLocal
+    , subscriptions =
+        buildSubscriptions proposalResponse
+            receiveEvents
+            sharedMsgDecoder
+            displayError
+            subscriptions
+    , view = constructCloudView updateCloud view
+    }
 
 
 
@@ -119,7 +145,7 @@ type ControlMsg sharedMsg
     | Reject ClientEventId (List (Event sharedMsg))
 
 
-constructCloudUpdate :
+buildCloudUpdate :
     (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
     -> (sharedMsg -> sharedModel -> sharedModel)
@@ -127,7 +153,7 @@ constructCloudUpdate :
     -> CloudMsg sharedMsg localMsg
     -> CloudModel sharedModel sharedMsg localModel
     -> ( CloudModel sharedModel sharedMsg localModel, Cmd (CloudMsg sharedMsg localMsg) )
-constructCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model =
+buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model =
     case msg of
         LocalOrigin { localMsg, proposedEvent } ->
             let
@@ -136,7 +162,14 @@ constructCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg mo
                         |> Maybe.withDefault ( model.localModel, Cmd.none )
 
                 ( newSharedModelState, sharedCmd ) =
-                    Maybe.map (\s -> updateSharedLocalOrigin proposal sharedMsgEncoder s model.sharedModelInfo) proposedEvent
+                    Maybe.map
+                        (\s ->
+                            updateSharedLocalOrigin proposal
+                                sharedMsgEncoder
+                                s
+                                model.sharedModelInfo
+                        )
+                        proposedEvent
                         |> Maybe.withDefault ( model.sharedModelInfo, Cmd.none )
             in
             ( { sharedModelInfo = newSharedModelState, localModel = newLocalModel }
@@ -146,7 +179,9 @@ constructCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg mo
         RemoteOrigin events ->
             ( { model
                 | sharedModelInfo =
-                    List.foldl (updateSharedRemoteModelOrigin coreUpdateFn) model.sharedModelInfo events
+                    List.foldl (updateSharedRemoteModelOrigin coreUpdateFn)
+                        model.sharedModelInfo
+                        events
               }
             , Cmd.none
             )
@@ -154,7 +189,11 @@ constructCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg mo
         ControlMsg controlMsg ->
             let
                 ( sharedModelInfo, cmd ) =
-                    updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model.sharedModelInfo
+                    updateWithControlMsg proposal
+                        sharedMsgEncoder
+                        coreUpdateFn
+                        controlMsg
+                        model.sharedModelInfo
             in
             ( { model | sharedModelInfo = sharedModelInfo }, cmd )
 
@@ -214,11 +253,20 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model =
                 acceptedEvent :: pendingEvents ->
                     ( { model
                         | latestKnownEventId = eventId
-                        , latestKnownSharedModel = coreUpdateFn acceptedEvent.msg model.latestKnownSharedModel
+                        , latestKnownSharedModel =
+                            coreUpdateFn acceptedEvent.msg
+                                model.latestKnownSharedModel
                         , pendingEvents = pendingEvents
                       }
                     , List.head pendingEvents
-                        |> Maybe.map (\nextEventToSend -> proposeEvent proposal sharedMsgEncoder nextEventToSend.msg eventId nextEventToSend.id)
+                        |> Maybe.map
+                            (\nextEventToSend ->
+                                proposeEvent proposal
+                                    sharedMsgEncoder
+                                    nextEventToSend.msg
+                                    eventId
+                                    nextEventToSend.id
+                            )
                         |> Maybe.withDefault Cmd.none
                     )
 
@@ -231,15 +279,23 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model =
                     List.head (List.reverse newerEvents)
             in
             ( { model
-                | latestKnownEventId = Maybe.map .id latest |> Maybe.withDefault model.latestKnownEventId
-                , latestKnownSharedModel = List.foldl coreUpdateFn model.latestKnownSharedModel (List.map .msg newerEvents)
+                | latestKnownEventId =
+                    Maybe.map .id latest
+                        |> Maybe.withDefault model.latestKnownEventId
+                , latestKnownSharedModel =
+                    List.foldl coreUpdateFn
+                        model.latestKnownSharedModel
+                        (List.map .msg newerEvents)
                 , pendingEvents = []
               }
             , Cmd.none
             )
 
 
-predictedSharedModel : (sharedMsg -> sharedModel -> sharedModel) -> SharedModelState sharedModel sharedMsg -> sharedModel
+predictedSharedModel :
+    (sharedMsg -> sharedModel -> sharedModel)
+    -> SharedModelState sharedModel sharedMsg
+    -> sharedModel
 predictedSharedModel coreUpdateFn model =
     List.foldl coreUpdateFn model.latestKnownSharedModel (List.map .msg model.pendingEvents)
 
@@ -282,8 +338,14 @@ buildSubscriptions proposalResponse receiveEvents sharedMsgDecoder displayErrorF
             LocalOrigin (localAction (displayErrorFn errorMessage))
     in
     Sub.batch
-        [ proposalResponse (decodeOrFail handleDecodeFailure (Json.Decode.map ControlMsg (decodeProposalResponse sharedMsgDecoder)))
-        , receiveEvents (decodeOrFail handleDecodeFailure (Json.Decode.map RemoteOrigin (Json.Decode.list (decodeEvent sharedMsgDecoder))))
+        [ proposalResponse
+            (decodeOrFail handleDecodeFailure
+                (Json.Decode.map ControlMsg (decodeProposalResponse sharedMsgDecoder))
+            )
+        , receiveEvents
+            (decodeOrFail handleDecodeFailure
+                (Json.Decode.map RemoteOrigin (Json.Decode.list (decodeEvent sharedMsgDecoder)))
+            )
         , Sub.map (LocalOrigin << localAction) localSubscriptions
         ]
 
