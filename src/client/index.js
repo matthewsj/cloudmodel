@@ -13,6 +13,7 @@ socket.on('catchup', (catchupMessage) => {
 });
 
 socket.on('event', (newEvent) => {
+  console.log("Received remote event", newEvent);
   app.ports.receiveEvents.send([newEvent]);
 })
 

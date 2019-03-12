@@ -13,15 +13,17 @@ io.on('connection', function(socket) {
   });
 
   socket.on('propose', function(proposal, responseFn) {
+    console.log("received proposal", proposal);
     const latestEventId = eventStream.length;
-    const { latestKnownEventId, sharedModelMsg, clientEventId } = proposal;
+    const { latestKnownEventId, sharedMsg, clientEventId } = proposal;
     if (latestKnownEventId === latestEventId) {
       const newEventId = latestEventId + 1;
       const newEvent = {
         id: newEventId,
-        msg: sharedModelMsg
+        msg: sharedMsg
       };
       eventStream.push(newEvent);
+      console.log("Accepted event", newEvent);
       socket.broadcast.emit('event', newEvent);
       responseFn({
         accept: {
@@ -30,6 +32,7 @@ io.on('connection', function(socket) {
         }
       });
     } else {
+      console.log("Rejected event", proposal);
       responseFn({
         reject: {
           clientEventId,
