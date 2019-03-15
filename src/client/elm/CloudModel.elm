@@ -110,6 +110,7 @@ buildInit clientInit flags =
     )
 
 
+-- Q (YK 2019/03/15): Should this also take a latest known event id or will the sharedModel always be empty?
 initSharedModelState : sharedModel -> SharedModelState sharedModel sharedMsg
 initSharedModelState initLatestKnownSharedModel =
     { latestKnownEventId = 0
@@ -248,6 +249,7 @@ updateWithControlMsg :
     -> ( SharedModelState sharedModel sharedMsg, Cmd (CloudMsg sharedMsg localMsg) )
 updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model =
     case controlMsg of
+        -- Q (YK 2019/03/15): It looks like `clientEventId` is unused?
         Accept eventId clientEventId ->
             case model.pendingEvents of
                 acceptedEvent :: pendingEvents ->
