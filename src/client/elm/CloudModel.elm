@@ -144,7 +144,8 @@ shared model (known to be accurate at `lastKnownEventId`) plus some pending
 messages that this client has proposed but that have not been accepted yet.
 -}
 type alias SharedModelState sharedModel sharedMsg =
-    { latestKnownEventId : EventId
+    { latestClientEventId : ClientEventId
+    , latestKnownEventId : EventId
     , latestKnownSharedModel : sharedModel
     , pendingEvents : List (Event sharedMsg)
     }
@@ -172,7 +173,8 @@ buildInit clientInit flags =
 
 initSharedModelState : sharedModel -> SharedModelState sharedModel sharedMsg
 initSharedModelState initLatestKnownSharedModel =
-    { latestKnownEventId = 0
+    { latestClientEventId = 0
+    , latestKnownEventId = 0
     , latestKnownSharedModel = initLatestKnownSharedModel
     , pendingEvents = []
     }
@@ -293,13 +295,14 @@ updateSharedLocalOrigin :
     -> ( SharedModelState sharedModel sharedMsg, Cmd (CloudMsg sharedMsg localMsg) )
 updateSharedLocalOrigin proposal sharedMsgEncoder msg model =
     let
+        newEventId = model.latestClientEventId + 1
         newEvent =
-            { msg = msg, id = 0 }
+            { msg = msg, id = newEventId }
     in
-    case model.pendingEvents of
+    case Debug.log "model.pendingEvents" model.pendingEvents of
         [] ->
-            ( { model | pendingEvents = [ newEvent ] }
-            , proposeEvent proposal sharedMsgEncoder msg model.latestKnownEventId 0
+            ( { model | pendingEvents = [ newEvent ], latestClientEventId = newEventId }
+            , proposeEvent proposal sharedMsgEncoder msg model.latestKnownEventId newEventId
             )
 
         _ :: _ ->
@@ -326,6 +329,7 @@ updateSharedRemoteModelOrigin coreUpdateFn event model =
     { model
         | latestKnownSharedModel = coreUpdateFn event.msg model.latestKnownSharedModel
         , latestKnownEventId = event.id
+        , latestClientEventId = max event.id model.latestClientEventId
     }
 
 
@@ -365,6 +369,7 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model =
                 _ ->
                     ( model, Cmd.none )
 
+        -- Q (YK 2019/03/15): Are we dropping all pending events if one is rejected?
         Reject clientId newerEvents ->
             let
                 latest =

@@ -41,6 +41,12 @@ io.on('connection', function(socket) {
       });
     }
   });
+
+  // (YK 2019/03/15): Here for testing disconnecting
+  // setTimeout(() => {
+  //   // This boolean trap is whether to close the connection: https://socket.io/docs/server-api/#socket-disconnect-close
+  //   socket.disconnect(true);
+  // }, 10 * 1000)
 });
 
 http.listen(3000, function() {
