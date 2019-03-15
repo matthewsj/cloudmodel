@@ -33,11 +33,15 @@ main =
 -- MODEL
 
 
+{-| The model that is shared across all clients.
+-}
 type alias SharedModel =
     { chats : List String
     }
 
 
+{-| The model that is local to this individual client.
+-}
 type alias LocalModel =
     { draft : String
     , errorMessage : Maybe String
@@ -48,6 +52,9 @@ type alias LocalModel =
 -- INIT
 
 
+{-| Initial values for shared and local models as well as local commands to
+run on start.
+-}
 init : () -> ( SharedModel, LocalModel, Cmd LocalChatMsg )
 init flags =
     ( initSharedModel
@@ -56,12 +63,16 @@ init flags =
     )
 
 
+{-| The initial shared model.
+-}
 initSharedModel : SharedModel
 initSharedModel =
     { chats = []
     }
 
 
+{-| The initial local model.
+-}
 initLocalModel : LocalModel
 initLocalModel =
     { draft = ""
@@ -73,17 +84,16 @@ initLocalModel =
 -- SHARED UPDATE
 
 
+{-| Shared messages. These messages update the shared model and we must write
+encoders and decoders for them so that they can be communicated over the
+network.
+-}
 type SharedMsg
     = AddChat String
 
 
-decodeSharedMsg : Decoder SharedMsg
-decodeSharedMsg =
-    oneOf
-        [ succeed AddChat |> required "addChat" Json.Decode.string
-        ]
-
-
+{-| Encodes shared messages to JSON.
+-}
 encodeSharedMsg : SharedMsg -> Json.Encode.Value
 encodeSharedMsg sharedModelMsg =
     case sharedModelMsg of
@@ -93,6 +103,19 @@ encodeSharedMsg sharedModelMsg =
                 ]
 
 
+{-| Decodes shared messages from the JSON representation written by
+`encodeSharedMsg`.
+-}
+decodeSharedMsg : Decoder SharedMsg
+decodeSharedMsg =
+    oneOf
+        [ succeed AddChat |> required "addChat" Json.Decode.string
+        ]
+
+
+{-| Updates the shared model. Shared model updates are not allowed to issue
+commands.
+-}
 updateShared : SharedMsg -> SharedModel -> SharedModel
 updateShared msg model =
     case msg of
@@ -104,6 +127,9 @@ updateShared msg model =
 -- LOCAL UPDATE
 
 
+{-| Local messages. These messages are applied to the local model only and may
+issue commands.
+-}
 type LocalChatMsg
     = ChangeDraft String
     | DisplayError String
