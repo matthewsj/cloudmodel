@@ -1,4 +1,39 @@
-module CloudModel exposing (CloudModel, CloudModelConfig, CloudMsg, LocalOriginAction, element, localAction, sharedAction, wrapAll)
+module CloudModel exposing
+    ( CloudModelConfig, element, wrapAll
+    , localAction, sharedAction
+    , CloudModel, CloudMsg, LocalOriginAction
+    )
+
+{-| This module provides an abstraction for "shared-workspace" web applications where multiple
+clients are conceptually manipulating a single, shared, persistent model of the world. Models are
+synced across clients, but clients can continue to operate in offline mode with shared-model actions
+taking effect immediately locally and reconciled with the rest of the clients when possible.
+
+The key concept is that instead of having a single model and message type, `CloudModel` programs
+have two of each: a shared model and corresponding shared messages to manipulate it that all clients
+can see, and a local model and corresponding local messages that are private to each client.
+To use the library, you need to provide an initial value for each of these models, an update function
+for each type of message and its corresponding model, encoders and decoders for your messages so that
+the library can handle syncing things with other clients, and some ports to communicate over.
+
+In addition to building your Elm program out of the functions in this library, to get a CloudModel
+program working you'll also need to use
+[the associated `index.js`](https://github.com/matthewsj/cloudmodel/blob/master/src/client/index.js)
+or another Javascript layer to communicate messages out of the client, and run
+[the associated server](https://github.com/matthewsj/cloudmodel/blob/master/src/server/index.js) or
+another similar server to manage communicating across all clients.
+
+
+# Creating a CloudModel program
+
+@docs CloudModelConfig, element, wrapAll
+
+
+# Convenience
+
+@docs localAction, sharedAction
+
+-}
 
 import Browser
 import Html exposing (Html)
@@ -7,6 +42,10 @@ import Json.Decode.Pipeline exposing (required)
 import Json.Encode
 
 
+{-| Configuration for a cloud model based application. Where normal Elm applications are built around
+a `Model` type and a `Msg` type, cloud model based applications have both a `SharedModel` and a
+`LocalModel`, and corresponding `SharedMsg` and `LocalMsg`s that interact with them.
+-}
 type alias CloudModelConfig sharedModel localModel sharedMsg localMsg flags =
     { sharedMsgDecoder : Json.Decode.Decoder sharedMsg
     , sharedMsgEncoder : sharedMsg -> Json.Decode.Value
@@ -26,6 +65,9 @@ type alias CloudModelConfig sharedModel localModel sharedMsg localMsg flags =
     }
 
 
+{-| The equivalent of `Browser.element` for a `CloudModel`-based program. You should probably use
+this as your program's main entry point.
+-}
 element :
     CloudModelConfig sharedModel localModel sharedMsg localMsg flags
     -> Program flags (CloudModel sharedModel sharedMsg localModel) (CloudMsg sharedMsg localMsg)
@@ -33,6 +75,9 @@ element cloudModelConfig =
     Browser.element (wrapAll cloudModelConfig)
 
 
+{-| For users with special needs, for instance for composing multiple large framework libraries,
+`wrapAll` takes a `CloudModel` config and produces standard Elm architecture functions.
+-}
 wrapAll :
     CloudModelConfig sharedModel localModel sharedMsg localMsg flags
     ->
@@ -67,22 +112,37 @@ wrapAll { sharedMsgDecoder, sharedMsgEncoder, displayError, init, updateCloud, u
 
 
 -- MODEL
+{- Internally the library works by wrapping user-supplied functions to produce new
+   update/view/init functions that have `CloudModel` and `CloudMsg` types
+   parameterized by user-supplied program-specific types. The extra functionality
+   keeps track of what messages have been
+-}
 
 
+{-| The server's canonical ID for an event.
+-}
 type alias EventId =
     Int
 
 
+{-| The client's non-canonical ID for an event.
+-}
 type alias ClientEventId =
     Int
 
 
+{-| The model type used by wrapped functions.
+-}
 type alias CloudModel sharedModel sharedMsg localModel =
     { sharedModelInfo : SharedModelState sharedModel sharedMsg
     , localModel : localModel
     }
 
 
+{-| A tracker that keeps track of the local client's understanding of the
+shared model (known to be accurate at `lastKnownEventId`) plus some pending
+messages that this client has proposed but that have not been accepted yet.
+-}
 type alias SharedModelState sharedModel sharedMsg =
     { latestKnownEventId : EventId
     , latestKnownSharedModel : sharedModel
@@ -122,29 +182,52 @@ initSharedModelState initLatestKnownSharedModel =
 -- UPDATE
 
 
+{-| A message received from the server. Events are the canonical record of
+what has happened to the cloud model and the client must defer to them.
+-}
 type alias Event sharedMsg =
     { msg : sharedMsg
     , id : EventId
     }
 
 
+{-| An action that originated on the local client. This may contain a local
+message intended to be consumed by the local client only, and may also
+contain a shared message that this client is proposing be applied to the
+shared model.
+-}
 type alias LocalOriginAction sharedMsg localMsg =
     { localMsg : Maybe localMsg
     , proposedEvent : Maybe sharedMsg
     }
 
 
+{-| A message coming from the server to the client in response to one of
+our proposals. If an event is accepted it is incorporated into the
+canonical model; if rejected we learn the rejected ID and also the complete
+list of events that happened after the last event our client knows about
+at the time of rejection.
+-}
+type ControlMsg sharedMsg
+    = Accept EventId ClientEventId
+    | Reject ClientEventId (List (Event sharedMsg))
+
+
+{-| The overall message type this program will use, which can be either a
+local message, a remote message to be applied to our shared model, or a
+control message in response to one of our proposals.
+-}
 type CloudMsg sharedMsg localMsg
     = LocalOrigin (LocalOriginAction sharedMsg localMsg)
     | RemoteOrigin (List (Event sharedMsg))
     | ControlMsg (ControlMsg sharedMsg)
 
 
-type ControlMsg sharedMsg
-    = Accept EventId ClientEventId
-    | Reject ClientEventId (List (Event sharedMsg))
-
-
+{-| Wraps the user-provided cloud update function. This function requires
+four parameters: the cloud and local update functions, and also a port
+for sending proposals and an encoder for cloud messages. It returns an update
+function.
+-}
 buildCloudUpdate :
     (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
@@ -198,6 +281,10 @@ buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model 
             ( { model | sharedModelInfo = sharedModelInfo }, cmd )
 
 
+{-| Updates the model to take into account a new, locally-proposed shared message.
+The shared message applies to this client's view of the world immediately but may
+be rolled back if rejected by the server.
+-}
 updateSharedLocalOrigin :
     (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
@@ -227,6 +314,9 @@ updateSharedLocalOrigin proposal sharedMsgEncoder msg model =
 -- TODO: Update this to be skeptical of whether the given event is really next
 
 
+{-| Updates the shared model with a new message received from the server.
+These messages are always canonical.
+-}
 updateSharedRemoteModelOrigin :
     (sharedMsg -> sharedModel -> sharedModel)
     -> Event sharedMsg
@@ -239,6 +329,8 @@ updateSharedRemoteModelOrigin coreUpdateFn event model =
     }
 
 
+{-| Updates the shared model with the result of a server-side control message.
+-}
 updateWithControlMsg :
     (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
@@ -292,6 +384,11 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model =
             )
 
 
+{-| Constructs a projected version of the shared model assuming all
+of our proposed events are accepted. This allows the local client
+to keep operating even if the server is temporarily unresponsive
+by predicting the results of actions.
+-}
 predictedSharedModel :
     (sharedMsg -> sharedModel -> sharedModel)
     -> SharedModelState sharedModel sharedMsg
@@ -300,6 +397,10 @@ predictedSharedModel coreUpdateFn model =
     List.foldl coreUpdateFn model.latestKnownSharedModel (List.map .msg model.pendingEvents)
 
 
+{-| Handles building a command that sends a JSON representation of
+a proposed action to the given port, which can then communicate it
+to the server for consideration.
+-}
 proposeEvent :
     (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
@@ -407,11 +508,17 @@ constructCloudView updateFn viewFn model =
 -- UTILITY
 
 
+{-| Convenience function that constructs a `LocalOriginAction`
+that only takes a local action.
+-}
 localAction : localMsg -> LocalOriginAction sharedMsg localMsg
 localAction localMsg =
     { localMsg = Just localMsg, proposedEvent = Nothing }
 
 
+{-| Convenience function that constructs a `LocalOriginAction`
+that only takes a shared action.
+-}
 sharedAction : sharedMsg -> LocalOriginAction sharedMsg localMsg
 sharedAction sharedMsg =
     { localMsg = Nothing, proposedEvent = Just sharedMsg }
