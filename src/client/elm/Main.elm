@@ -156,7 +156,8 @@ type alias ChatAction =
 view : SharedModel -> LocalModel -> Html ChatAction
 view sharedModel localModel =
     div []
-        [ ul [ id "messages" ] (List.map (\chat -> li [] [ text chat ]) sharedModel.chats)
+        [ div [id "errorMessage"] [ text (Maybe.withDefault "" localModel.errorMessage) ]
+        , ul [ id "messages" ] (List.map (\chat -> li [] [ text chat ]) sharedModel.chats)
         , div [ id "chatform" ]
             [ input [ value localModel.draft, onInput (ChangeDraft >> localAction) ] []
             , button
