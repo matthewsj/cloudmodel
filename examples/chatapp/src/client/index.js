@@ -1,26 +1,15 @@
 import './index.html';
 
 import { Elm } from './elm/Main.elm';
+import { initializePorts } from 'elm-cloudmodel';
+
 
 const app = Elm.Main.init({
   node: document.getElementById('elm')
 });
-const socket = io();
 
-socket.on('catchup', (catchupMessage) => {
-  const { eventStream } = catchupMessage;
-  app.ports.receiveEvents.send(eventStream);
-});
-
-socket.on('event', (newEvent) => {
-  console.log("Received remote event", newEvent);
-  app.ports.receiveEvents.send([newEvent]);
-})
-
-app.ports.proposal.subscribe(function(event) {
-  console.log("Sending proposal", event);
-  socket.emit('propose', event, (response) => {
-    console.log("Received response", response);
-    app.ports.proposalResponse.send(response);
-  });
+initializePorts({
+  proposal: app.ports.proposal,
+  proposalResponse: app.ports.proposalResponse,
+  receiveEvents: app.ports.receiveEvents,
 });

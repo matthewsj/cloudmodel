@@ -1,5 +1,5 @@
 {
-  "name": "elm-cloudmodel",
+  "name": "elm-cloudmodel-chatapp-example",
   "version": "0.0.1",
   "description": "Elm cloud model demonstration app",
   "main": "src/server/index.js",
@@ -15,8 +15,7 @@
   "repository": "https://github.com/matthewsj/elm-cloudmodel.git",
   "dependencies": {
     "babel-polyfill": "^6.26.0",
-    "elm-cloudmodel-server": "../../src",
-    "socket.io-client": "^2.2.0"
+    "elm-cloudmodel": "../../src"
   },
   "devDependencies": {
     "@babel/core": "^7.3.3",
