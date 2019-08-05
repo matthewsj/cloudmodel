@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 const express = require('express');
 const app = express();
 const http = require('http').Server(app);
@@ -7,12 +9,12 @@ app.use(express.static('dist'));
 
 const eventStream = [];
 
-io.on('connection', function(socket) {
+io.on('connection', function (socket) {
   socket.emit('catchup', {
     eventStream
   });
 
-  socket.on('propose', function(proposal, responseFn) {
+  socket.on('propose', function (proposal, responseFn) {
     console.log("received proposal", proposal);
     const latestEventId = eventStream.length;
     const { latestKnownEventId, sharedMsg, clientEventId } = proposal;
@@ -43,6 +45,6 @@ io.on('connection', function(socket) {
   });
 });
 
-http.listen(3000, function() {
+http.listen(3000, function () {
   console.log('listening on *:3000');
 });

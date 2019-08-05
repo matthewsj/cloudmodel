@@ -1,0 +1,23 @@
+{
+  "name": "elm-cloudmodel-server",
+  "version": "0.0.1",
+  "description": "Code for writing an Elm cloudmodel application",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "nodemon src/server/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "cloudmodel_serve": "./server/index.js"
+  },
+  "author": "Jacob Matthews",
+  "repository": "https://github.com/matthewsj/elm-cloudmodel.git",
+  "license": "MIT",
+  "devDependencies": {
+    "nodemon": "^1.19.1"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "socket.io": "^2.2.0"
+  }
+}
