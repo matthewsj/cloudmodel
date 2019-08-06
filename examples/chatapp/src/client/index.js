@@ -9,7 +9,7 @@ const app = Elm.Main.init({
 });
 
 initializePorts({
-  proposal: app.ports.proposal,
-  proposalResponse: app.ports.proposalResponse,
-  receiveEvents: app.ports.receiveEvents,
+  onProposal: app.ports.proposal.subscribe,
+  proposalResponse: app.ports.proposalResponse.send,
+  receiveEvents: app.ports.receiveEvents.send,
 });

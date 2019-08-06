@@ -1,9 +1,10 @@
 {
   "name": "elm-cloudmodel",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Code for writing an Elm cloudmodel application",
   "main": "client/js/index.js",
   "scripts": {
+    "compile": "npx tsc",
     "dev": "nodemon src/server/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -14,7 +15,9 @@
   "repository": "https://github.com/matthewsj/elm-cloudmodel.git",
   "license": "MIT",
   "devDependencies": {
-    "nodemon": "^1.19.1"
+    "@types/socket.io-client": "^1.4.32",
+    "nodemon": "^1.19.1",
+    "typescript": "^3.5.3"
   },
   "dependencies": {
     "express": "^4.17.1",
