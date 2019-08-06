@@ -8,6 +8,7 @@ import Json.Decode exposing (Decoder)
 import Json.Decode.Pipeline exposing (required)
 import Json.Encode
 import Html.Lazy exposing (lazy, lazy2)
+import Html.Keyed as Keyed
 
 
 
@@ -48,12 +49,24 @@ type alias TodoItem =
     , id : Int
     }
 
+type Visibility
+    = VisibilityAll
+    | VisibilityActive
+    | VisibilityCompleted
+
+visibilityToString : Visibility -> String
+visibilityToString visibility =
+    case visibility of
+        VisibilityAll -> "All"
+        VisibilityActive -> "Active"
+        VisibilityCompleted -> "Completed"
+
 {-| The model that is local to this individual client.
 -}
 type alias LocalModel =
     { draft : String
     , errorMessage : Maybe String
-    , visibility : String -- TODO: Better type
+    , visibility : Visibility
     }
 
 
@@ -87,7 +100,7 @@ initLocalModel : LocalModel
 initLocalModel =
     { draft = ""
     , errorMessage = Nothing
-    , visibility = "All"
+    , visibility = VisibilityAll
     }
 
 
@@ -101,6 +114,11 @@ network.
 -}
 type SharedMsg
     = AddTodo TodoItem
+    -- | UpdateTodoItem Int String
+    -- | Delete Int
+    -- | DeleteComplete
+    -- | Check Int Bool
+    -- | CheckAll Bool
 
 
 {-| Encodes shared messages to JSON.
@@ -159,21 +177,16 @@ type LocalMsg
     = DisplayError String
     | UpdateField String
     -- | EditingTodoItem Int Bool
-    -- | UpdateTodoItem Int String
-    -- | Add
-    -- | Delete Int
-    -- | DeleteComplete
-    -- | Check Int Bool
-    -- | CheckAll Bool
-    -- | ChangeVisibility String
+    | ChangeVisibility Visibility
 
 
 updateLocal : LocalMsg -> LocalModel -> ( LocalModel, Cmd msg )
 updateLocal msg model =
     case msg of
+        ChangeVisibility visibility -> ( { model | visibility = visibility}, Cmd.none )
+        DisplayError error -> ( { model | errorMessage = Just error }, Cmd.none )
         UpdateField draft ->
             ( { model | draft = draft }, Cmd.none )
-        DisplayError error -> ( { model | errorMessage = Just error }, Cmd.none )
 
 
 type alias TodoAction =
@@ -190,7 +203,8 @@ view sharedModel localModel =
         [ class "todomvc-wrapper"
         , style "visibility" "hidden"
         ]
-        [ section
+        [ errorMessage localModel.errorMessage
+        , section
             [ class "todoapp" ]
             [ lazy2 viewInput localModel.draft sharedModel.uid
             , lazy2 viewEntries localModel.visibility sharedModel.todos
@@ -199,6 +213,11 @@ view sharedModel localModel =
         , infoFooter
         ]
 
+errorMessage : Maybe String -> Html msg
+errorMessage maybeError =
+    case maybeError of
+        Just error -> Html.text error
+        Nothing -> Html.text ""
 
 viewInput : String -> Int -> Html TodoAction
 viewInput task uid =
@@ -238,24 +257,22 @@ onEnter msg =
 -- VIEW ALL ENTRIES
 
 
-viewEntries : String -> List TodoItem -> Html TodoAction
+viewEntries : Visibility -> List TodoItem -> Html TodoAction
 viewEntries visibility entries =
     let
         isVisible todo =
             case visibility of
-                "Completed" ->
+                VisibilityCompleted ->
                     todo.completed
 
-                "Active" ->
+                VisibilityActive ->
                     not todo.completed
 
-                _ ->
+                VisibilityAll ->
                     True
 
-        -- allCompleted =
-        --     List.all .completed entries
-
-        allCompleted = entries
+        allCompleted =
+            List.all .completed entries
 
         cssVisibility =
             if List.isEmpty entries then
@@ -267,7 +284,6 @@ viewEntries visibility entries =
             [ class "main"
             , style "visibility" cssVisibility
             ]
-            []
             -- [ input
             --     [ class "toggle-all"
             --     , type_ "checkbox"
@@ -279,9 +295,9 @@ viewEntries visibility entries =
             -- , label
             --     [ for "toggle-all" ]
             --     [ text "Mark all as complete" ]
-            -- , Keyed.ul [ class "todo-list" ] <|
-            --     List.map viewKeyedTodoItem (List.filter isVisible entries)
-            -- ]
+            [ Keyed.ul [ class "todo-list" ] <|
+                List.map viewKeyedTodoItem (List.filter isVisible entries)
+            ]
 
 
 
@@ -296,50 +312,51 @@ viewKeyedTodoItem todo =
 
 viewTodoItem : TodoItem -> Html TodoAction
 viewTodoItem todo =
-    li
-        -- [ classList [ ( "completed", todo.completed ), ( "editing", todo.editing ) ] ]
-        [ classList [ ( "completed", False ), ( "editing", False ) ] ]
-        [ div
-            [ class "view" ]
-            [ input
-                [ class "toggle"
-                , type_ "checkbox"
-                , checked False
-                -- , onClick (Check todo.id (not todo.completed))
-                ]
+    let isEditing = False
+    in
+        li
+            [ classList [ ( "completed", todo.completed ), ( "editing", isEditing ) ] ]
+            [ div
+                [ class "view" ]
+                [ input
+                    [ class "toggle"
+                    , type_ "checkbox"
+                    , checked False
+                    -- , onClick (Check todo.id (not todo.completed))
+                    ]
+                    []
+                , label
                 []
-            , label
-              []
-                -- [ onDoubleClick (EditingTodoItem todo.id True) ]
-                [ text todo.description ]
-            , button
-                [ class "destroy"
-                -- , onClick (Delete todo.id)
+                    -- [ onDoubleClick (EditingTodoItem todo.id True) ]
+                    [ text todo.description ]
+                , button
+                    [ class "destroy"
+                    -- , onClick (Delete todo.id)
+                    ]
+                    []
+                ]
+            , input
+                [ class "edit"
+                , value todo.description
+                , name "title"
+                , id ("todo-" ++ String.fromInt todo.id)
+                -- , onInput (UpdateTodoItem todo.id)
+                -- , onBlur (EditingTodoItem todo.id False)
+                -- , onEnter (EditingTodoItem todo.id False)
                 ]
                 []
             ]
-        , input
-            [ class "edit"
-            , value todo.description
-            , name "title"
-            , id ("todo-" ++ String.fromInt todo.id)
-            -- , onInput (UpdateTodoItem todo.id)
-            -- , onBlur (EditingTodoItem todo.id False)
-            -- , onEnter (EditingTodoItem todo.id False)
-            ]
-            []
-        ]
 
 
 
 -- VIEW CONTROLS AND FOOTER
 
 
-viewControls : String -> List TodoItem -> Html TodoAction
+viewControls : Visibility -> List TodoItem -> Html TodoAction
 viewControls visibility entries =
     let
         entriesCompleted =
-            List.length entries
+            List.length (List.filter .completed entries)
 
         entriesLeft =
             List.length entries - entriesCompleted
@@ -370,25 +387,24 @@ viewControlsCount entriesLeft =
             ]
 
 
-viewControlsFilters : String -> Html TodoAction
+viewControlsFilters : Visibility -> Html TodoAction
 viewControlsFilters visibility =
     ul
         [ class "filters" ]
-        [ visibilitySwap "#/" "All" visibility
+        [ visibilitySwap "#/" VisibilityAll visibility
         , text " "
-        , visibilitySwap "#/active" "Active" visibility
+        , visibilitySwap "#/active" VisibilityActive visibility
         , text " "
-        , visibilitySwap "#/completed" "Completed" visibility
+        , visibilitySwap "#/completed" VisibilityCompleted visibility
         ]
 
 
-visibilitySwap : String -> String -> String -> Html TodoAction
+visibilitySwap : String -> Visibility -> Visibility -> Html TodoAction
 visibilitySwap uri visibility actualVisibility =
     li
-        []
-        -- [ onClick (ChangeVisibility visibility) ]
+        [ onClick (ChangeVisibility visibility |> localAction) ]
         [ a [ href uri, classList [ ( "selected", visibility == actualVisibility ) ] ]
-            [ text visibility ]
+            [ text (visibilityToString visibility) ]
         ]
 
 
