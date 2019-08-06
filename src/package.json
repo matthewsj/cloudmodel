@@ -1,0 +1,30 @@
+{
+  "name": "elm-cloudmodel",
+  "version": "0.1.0",
+  "description": "Code for writing an Elm cloudmodel application",
+  "main": "client/js/index.js",
+  "scripts": {
+    "clean": "rm -rf ./docs && rm client/js/index.js*",
+    "compile": "npx tsc",
+    "dev": "nodemon src/server/index.js",
+    "docs": "echo 'This is a work in progress...' && npx typedoc --out docs ./client/js/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": {
+    "cloudmodel_serve": "./server/index.js"
+  },
+  "author": "Jacob Matthews",
+  "repository": "https://github.com/matthewsj/elm-cloudmodel.git",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/socket.io-client": "^1.4.32",
+    "nodemon": "^1.19.1",
+    "typedoc": "^0.15.0",
+    "typescript": "^3.5.3"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "socket.io": "^2.2.0",
+    "socket.io-client": "^2.2.0"
+  }
+}

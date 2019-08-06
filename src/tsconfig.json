@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "esModuleInterop": true,
+    "module": "commonjs",
+    "removeComments": true,
+    "strict": true,
+    "sourceMap": true,
+    "target": "es6"
+  },
+  "files": [
+    "client/js/index.ts",
+  ]
+}

@@ -1,13 +1,13 @@
 {
-  "name": "elm-cloudmodel",
+  "name": "elm-cloudmodel-chatapp-example",
   "version": "0.0.1",
   "description": "Elm cloud model demonstration app",
   "main": "src/server/index.js",
   "scripts": {
     "build": "webpack --mode production",
-    "start": "npm run build && node src/server/index.js",
+    "start": "npm run build && npm run server",
     "client": "webpack-dev-server --mode development --devtool inline-source-map --hot",
-    "server": "nodemon src/server/index.js",
+    "server": "npx cloudmodel_serve",
     "dev": "concurrently \"npm run server\" \"npm run client\""
   },
   "author": "Jacob Matthews",
@@ -15,9 +15,7 @@
   "repository": "https://github.com/matthewsj/elm-cloudmodel.git",
   "dependencies": {
     "babel-polyfill": "^6.26.0",
-    "express": "^4.16.4",
-    "socket.io": "^2.2.0",
-    "socket.io-client": "^2.2.0"
+    "elm-cloudmodel": "../../src"
   },
   "devDependencies": {
     "@babel/core": "^7.3.3",
@@ -29,7 +27,6 @@
     "elm-webpack-loader": "^5.0.0",
     "file-loader": "^3.0.0",
     "html-webpack-plugin": "^3.2.0",
-    "nodemon": "^1.17.3",
     "style-loader": "^0.23.0",
     "url-loader": "^1.0.1",
     "webpack": "^4.5.0",
