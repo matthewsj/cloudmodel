@@ -1,6 +1,6 @@
 port module Main exposing (main)
 
-import CloudModel exposing (localAction)
+import CloudModel exposing (localAction, sharedAction)
 import Html exposing (Html, button, div, input, li, text, ul, footer, p, a, section, header, h1, label, span, strong)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput)
@@ -117,8 +117,8 @@ type SharedMsg
     -- | UpdateTodoItem Int String
     -- | Delete Int
     -- | DeleteComplete
-    -- | Check Int Bool
-    -- | CheckAll Bool
+    | CheckTodo Int Bool
+    | CheckAll Bool
 
 
 {-| Encodes shared messages to JSON.
@@ -129,6 +129,16 @@ encodeSharedMsg sharedModelMsg =
         AddTodo todoItem ->
             Json.Encode.object
                 [ ( "addTodo", encodeTodoItem todoItem )
+                ]
+        CheckTodo id isCompleted ->
+            Json.Encode.object
+                [ ( "checkTodo",
+                    Json.Encode.object [ ("id", Json.Encode.int id), ("isCompleted", Json.Encode.bool isCompleted) ] )
+                ]
+        CheckAll isCompleted ->
+            Json.Encode.object
+                [ ( "checkAll",
+                    Json.Encode.object [ ("isCompleted", Json.Encode.bool isCompleted) ] )
                 ]
 
 encodeTodoItem : TodoItem -> Json.Encode.Value
@@ -145,6 +155,13 @@ decodeSharedMsg : Decoder SharedMsg
 decodeSharedMsg =
     Json.Decode.oneOf
         [ Json.Decode.succeed AddTodo |> required "addTodo" decodeTodoItem
+        , Json.Decode.map2
+            CheckTodo
+            (Json.Decode.at ["checkTodo", "id"] Json.Decode.int)
+            (Json.Decode.at ["checkTodo", "isCompleted"] Json.Decode.bool)
+        , Json.Decode.map
+            CheckAll
+            (Json.Decode.at ["checkTodo", "isCompleted"] Json.Decode.bool)
         ]
 
 
@@ -163,7 +180,24 @@ updateShared : SharedMsg -> SharedModel -> SharedModel
 updateShared msg model =
     case msg of
         AddTodo newTodo ->
-            Debug.log "newModel" { model | todos = List.append model.todos [ newTodo ], uid = newTodo.id + 1 }
+            { model | todos = List.append model.todos [ newTodo ], uid = newTodo.id + 1 }
+        CheckTodo id isCompleted ->
+            let
+                updateEntry t =
+                    if t.id == id then
+                        { t | completed = isCompleted }
+                    else
+                        t
+            in
+                { model | todos = List.map updateEntry model.todos }
+        CheckAll isCompleted -> 
+            let
+                checkEntry t =
+                    { t | completed = isCompleted }
+            in
+                { model | todos = List.map checkEntry model.todos }
+
+
 
 
 
@@ -284,18 +318,18 @@ viewEntries visibility entries =
             [ class "main"
             , style "visibility" cssVisibility
             ]
-            -- [ input
-            --     [ class "toggle-all"
-            --     , type_ "checkbox"
-            --     , name "toggle"
-            --     , checked allCompleted
-            --     , onClick (CheckAll (not allCompleted))
-            --     ]
-            --     []
-            -- , label
-            --     [ for "toggle-all" ]
-            --     [ text "Mark all as complete" ]
-            [ Keyed.ul [ class "todo-list" ] <|
+            [ input
+                [ class "toggle-all"
+                , type_ "checkbox"
+                , name "toggle"
+                , checked allCompleted
+                , onClick (CheckAll (not allCompleted) |> sharedAction)
+                ]
+                []
+            , label
+                [ for "toggle-all" ]
+                [ text "Mark all as complete" ]
+            , Keyed.ul [ class "todo-list" ] <|
                 List.map viewKeyedTodoItem (List.filter isVisible entries)
             ]
 
@@ -321,8 +355,8 @@ viewTodoItem todo =
                 [ input
                     [ class "toggle"
                     , type_ "checkbox"
-                    , checked False
-                    -- , onClick (Check todo.id (not todo.completed))
+                    , checked todo.completed
+                    , onClick (CheckTodo todo.id (not todo.completed) |> sharedAction)
                     ]
                     []
                 , label
