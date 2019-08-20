@@ -10,6 +10,7 @@ import Html.Lazy exposing (lazy, lazy2, lazy3)
 import Json.Decode exposing (Decoder)
 import Json.Decode.Pipeline exposing (required)
 import Json.Encode
+import Json.Encode.Extra
 import Task
 
 
@@ -37,11 +38,17 @@ main =
 -- MODEL
 
 
+unassignedStringConstant : String
+unassignedStringConstant =
+    "Unassigned"
+
+
 {-| The model that is shared across all clients.
 -}
 type alias SharedModel =
     { todos : List TodoItem
     , uid : Int
+    , knownOwners : List Person
     }
 
 
@@ -49,7 +56,12 @@ type alias TodoItem =
     { description : String
     , completed : Bool
     , id : Int
+    , owner : Maybe Person
     }
+
+
+type alias Person =
+    { name : String }
 
 
 type alias TodoBeingEdited =
@@ -80,7 +92,9 @@ visibilityToString visibility =
 {-| The model that is local to this individual client.
 -}
 type alias LocalModel =
-    { draft : String
+    { currentUser : Maybe Person
+    , filteringByOwner : Maybe Person
+    , draft : String
     , todoBeingEdited : Maybe TodoBeingEdited
     , errorMessage : Maybe String
     , visibility : Visibility
@@ -108,6 +122,7 @@ initSharedModel : SharedModel
 initSharedModel =
     { todos = []
     , uid = 0
+    , knownOwners = [ { name = "Yoni" }, { name = "Jaclyn" }, { name = "Jacob" } ]
     }
 
 
@@ -115,7 +130,9 @@ initSharedModel =
 -}
 initLocalModel : LocalModel
 initLocalModel =
-    { draft = ""
+    { currentUser = Nothing
+    , draft = ""
+    , filteringByOwner = Nothing
     , errorMessage = Nothing
     , todoBeingEdited = Nothing
     , visibility = VisibilityAll
@@ -191,7 +208,14 @@ encodeTodoItem todoItem =
         [ ( "description", Json.Encode.string todoItem.description )
         , ( "completed", Json.Encode.bool todoItem.completed )
         , ( "id", Json.Encode.int todoItem.id )
+        , ( "owner", Json.Encode.Extra.maybe encodePerson todoItem.owner )
         ]
+
+
+encodePerson : Person -> Json.Encode.Value
+encodePerson person =
+    Json.Encode.object
+        [ ( "name", Json.Encode.string person.name ) ]
 
 
 {-| Decodes shared messages from the JSON representation written by
@@ -227,6 +251,13 @@ decodeTodoItem =
         |> required "description" Json.Decode.string
         |> required "completed" Json.Decode.bool
         |> required "id" Json.Decode.int
+        |> required "owner" (Json.Decode.maybe decodePerson)
+
+
+decodePerson : Decoder Person
+decodePerson =
+    Json.Decode.succeed Person
+        |> required "name" Json.Decode.string
 
 
 {-| Updates the shared model. Shared model updates are not allowed to issue
@@ -289,6 +320,7 @@ type LocalMsg
     | UpdateEditingTodoItem String
     | StopEditingTodoItem
     | ChangeVisibility Visibility
+    | ChangeFilteredOwner (Maybe Person)
 
 
 updateLocal : LocalMsg -> LocalModel -> ( LocalModel, Cmd LocalMsg )
@@ -299,6 +331,9 @@ updateLocal msg model =
 
         ChangeVisibility visibility ->
             ( { model | visibility = visibility }, Cmd.none )
+
+        ChangeFilteredOwner filteringByOwner ->
+            ( { model | filteringByOwner = filteringByOwner }, Cmd.none )
 
         DisplayError error ->
             ( { model | errorMessage = Just error }, Cmd.none )
@@ -350,11 +385,18 @@ view sharedModel localModel =
         , section
             [ class "todoapp" ]
             [ lazy2 viewInput localModel.draft sharedModel.uid
-            , lazy3 viewEntries localModel.todoBeingEdited localModel.visibility sharedModel.todos
+            , viewEntries localModel.todoBeingEdited localModel.filteringByOwner localModel.visibility sharedModel.todos
+            , lazy3 viewOwners localModel.filteringByOwner sharedModel.knownOwners sharedModel.todos
             , lazy2 viewControls localModel.visibility sharedModel.todos
             ]
         , infoFooter
         ]
+
+
+maybeOwnerToString : Maybe Person -> String
+maybeOwnerToString =
+    Maybe.map (\owner -> owner.name)
+        >> Maybe.withDefault unassignedStringConstant
 
 
 errorMessage : Maybe String -> Html msg
@@ -387,7 +429,7 @@ viewInput task uid =
 
 createNewTodo : String -> Int -> TodoItem
 createNewTodo description id =
-    { description = description, completed = False, id = id }
+    { description = description, completed = False, id = id, owner = Nothing }
 
 
 onEnter : TodoAction -> Html.Attribute TodoAction
@@ -407,8 +449,8 @@ onEnter msg =
 -- VIEW ALL ENTRIES
 
 
-viewEntries : Maybe TodoBeingEdited -> Visibility -> List TodoItem -> Html TodoAction
-viewEntries maybeTodoBeingEdited visibility entries =
+viewEntries : Maybe TodoBeingEdited -> Maybe Person -> Visibility -> List TodoItem -> Html TodoAction
+viewEntries maybeTodoBeingEdited filteringByOwner visibility entries =
     let
         isVisible todo =
             case visibility of
@@ -420,6 +462,9 @@ viewEntries maybeTodoBeingEdited visibility entries =
 
                 VisibilityAll ->
                     True
+
+        isVisibleForOwner todo =
+            todo.owner == filteringByOwner
 
         allCompleted =
             List.all .completed entries
@@ -447,7 +492,7 @@ viewEntries maybeTodoBeingEdited visibility entries =
             [ for "toggle-all" ]
             [ text "Mark all as complete" ]
         , Keyed.ul [ class "todo-list" ] <|
-            List.map (viewKeyedTodoItem maybeTodoBeingEdited) (List.filter isVisible entries)
+            List.map (viewKeyedTodoItem maybeTodoBeingEdited) (List.filter (\todo -> isVisible todo && isVisibleForOwner todo) entries)
         ]
 
 
@@ -485,9 +530,15 @@ viewTodoItem maybeTodoBeingEdited todo =
                 , onClick (CheckTodo todo.id (not todo.completed) |> sharedAction)
                 ]
                 []
-            , label
-                [ onDoubleClick (StartEditingTodoItem todo.id todo.description |> localAction) ]
-                [ text todo.description ]
+            , div
+                [ class "todo-details" ]
+                [ label
+                    [ onDoubleClick (StartEditingTodoItem todo.id todo.description |> localAction) ]
+                    [ text todo.description ]
+                , div
+                    [ classList [ ( "todo-owner", True ), ( "unassigned", todo.owner == Nothing ) ] ]
+                    [ text (maybeOwnerToString todo.owner) ]
+                ]
             , button
                 [ class "destroy"
                 , onClick (DeleteTodo todo.id |> sharedAction)
@@ -504,6 +555,47 @@ viewTodoItem maybeTodoBeingEdited todo =
             , onEnter saveEditTodoAction
             ]
             []
+        ]
+
+
+
+-- VIEW OWNERS
+
+
+viewOwners : Maybe Person -> List Person -> List TodoItem -> Html TodoAction
+viewOwners filteringByOwner knownOwners entries =
+    footer
+        [ class "footer"
+        , hidden (List.isEmpty entries)
+        ]
+        [ lazy2 viewControlsOwnerFilters filteringByOwner knownOwners
+        ]
+
+
+viewControlsOwnerFilters : Maybe Person -> List Person -> Html TodoAction
+viewControlsOwnerFilters filteringByOwner knownOwners =
+    let
+        ownerNames =
+            List.map (\person -> Just person) knownOwners
+
+        unassigendAndOwners =
+            [ Nothing ] ++ ownerNames
+
+        ownerSwaps =
+            List.map (\ownerName -> ownerSwap ownerName filteringByOwner) unassigendAndOwners
+    in
+    ul
+        [ class "filters" ]
+        (List.intersperse (text " ") ownerSwaps)
+
+
+ownerSwap : Maybe Person -> Maybe Person -> Html TodoAction
+ownerSwap owner filteringByOwner =
+    li
+        [ onClick (ChangeFilteredOwner owner |> localAction)
+        ]
+        [ a [ href "#/", classList [ ( "selected", owner == filteringByOwner ) ] ]
+            [ text (maybeOwnerToString owner) ]
         ]
 
 
