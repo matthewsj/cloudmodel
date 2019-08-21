@@ -261,14 +261,17 @@ buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model 
             )
 
         RemoteOrigin events ->
-            ( { model
-                | sharedModelInfo =
-                    List.foldl (updateSharedRemoteModelOrigin coreUpdateFn)
-                        model.sharedModelInfo
-                        events
-              }
-            , Cmd.none
-            )
+            let newEvents =
+                List.filter (\event -> event.id > model.sharedModelInfo.latestKnownEventId) events
+            in
+                ( { model
+                    | sharedModelInfo =
+                        List.foldl (updateSharedRemoteModelOrigin coreUpdateFn)
+                            model.sharedModelInfo
+                            newEvents
+                }
+                , Cmd.none
+                )
 
         ControlMsg controlMsg ->
             let
