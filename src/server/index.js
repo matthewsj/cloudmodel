@@ -4,8 +4,39 @@ const express = require('express');
 const app = express();
 const http = require('http').Server(app);
 const io = require('socket.io')(http);
+const fs = require('fs');
+const path = require('path');
+const yargs = require('yargs');
 
-app.use(express.static('dist'));
+const parsedArgs = yargs
+  .option('port', {
+    alias: 'p',
+    default: 3000,
+    demandOption: true,
+    description: 'The port on which to serve',
+    type: 'number',
+  })
+  .option('static_dir', {
+    alias: 'd',
+    description: 'The directory of the static frontend asset to serve. If none is provided, no asset will be served.',
+    type: 'string',
+  })
+  .check(function (argv, options) {
+    if (!argv.static_dir) {
+      return true;
+    }
+    const staticDir = computeAbsServingDirectory(argv.static_dir);
+    if (!fs.existsSync(staticDir)) {
+      throw new Error(`Cannot find assets at ${staticDir}`);
+    }
+    return true;
+  })
+  .argv;
+
+if (parsedArgs.static_dir) {
+  const staticDir = computeAbsServingDirectory(parsedArgs.static_dir);
+  app.use(express.static(staticDir));
+}
 
 const eventStream = [];
 
@@ -45,6 +76,14 @@ io.on('connection', function (socket) {
   });
 });
 
-http.listen(3000, function () {
-  console.log('listening on *:3000');
+http.listen(parsedArgs.port, function () {
+  if (parsedArgs.static_dir) {
+    console.log(`Serving from ${parsedArgs.static_dir} listening on port *:${parsedArgs.port}`);
+  } else {
+    console.log(`Socket server is listening on port *:${parsedArgs.port}`)
+  }
 });
+
+function computeAbsServingDirectory(staticDir) {
+  return path.join(process.cwd(), staticDir);
+}
