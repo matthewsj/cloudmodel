@@ -208,6 +208,11 @@ label[for='toggle-all'] {
     background-color: lightgreen;
 }
 
+.todo-details {
+    display: flex;
+    justify-content: space-between;
+}
+
 .todo-list li label {
     white-space: pre-line;
     word-break: break-all;
@@ -216,6 +221,33 @@ label[for='toggle-all'] {
     display: block;
     line-height: 1.2;
     transition: color 0.4s;
+}
+
+.todo-list li .todo-owner {
+    white-space: pre-line;
+    word-break: break-all;
+    padding: 15px 60px 15px 15px;
+    margin-left: 45px;
+    display: block;
+    line-height: 1.2;
+    transition: color 0.4s;
+}
+
+.todo-owner.unassigned {
+    color: #d9d9d9;
+}
+
+.owners-footer {
+    color: #777;
+    padding: 10px 15px;
+    height: 20px;
+    text-align: center;
+    border-top: 1px solid #e6e6e6;
+    display: flex;
+}
+
+.owner-name {
+    flex: 0 0 auto;
 }
 
 .todo-list li.completed label {
@@ -288,6 +320,12 @@ label[for='toggle-all'] {
 
 .todo-count strong {
     font-weight: 300;
+}
+
+.owners-filters {
+    flex: 1 0 0%;
+    /* !important b/c I don't want to refactor the .filters css */
+    position: static !important;
 }
 
 .filters {
@@ -381,6 +419,10 @@ html .clear-completed:active {
 
 @media (max-width: 430px) {
     .footer {
+        height: 50px;
+    }
+
+    .owners-footer {
         height: 50px;
     }
 
