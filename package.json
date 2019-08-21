@@ -14,7 +14,7 @@
     "cloudmodel_serve": "./src/server/index.js"
   },
   "files": [
-    "./src",
+    "/src"
   ],
   "author": "Jacob Matthews",
   "repository": "https://github.com/matthewsj/elm-cloudmodel.git",
