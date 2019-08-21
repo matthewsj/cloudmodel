@@ -262,7 +262,7 @@ buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model 
 
         RemoteOrigin events ->
             let newEvents =
-                List.filter (\event -> event.id > model.sharedModelInfo.latestKnownEventId) events
+                    List.filter (\event -> event.id > model.sharedModelInfo.latestKnownEventId) events
             in
                 ( { model
                     | sharedModelInfo =
