@@ -89,11 +89,17 @@ visibilityToString visibility =
             "Completed"
 
 
+type OwnerVisibility
+    = AssignedToAny
+    | Unassigned
+    | AssignedTo Person
+
+
 {-| The model that is local to this individual client.
 -}
 type alias LocalModel =
     { currentUser : Maybe Person
-    , filteringByOwner : Maybe Person
+    , filteringByOwner : OwnerVisibility
     , draft : String
     , todoBeingEdited : Maybe TodoBeingEdited
     , errorMessage : Maybe String
@@ -122,7 +128,7 @@ initSharedModel : SharedModel
 initSharedModel =
     { todos = []
     , uid = 0
-    , knownOwners = [ { name = "Yoni" }, { name = "Jaclyn" }, { name = "Jacob" } ]
+    , knownOwners = []
     }
 
 
@@ -132,7 +138,7 @@ initLocalModel : LocalModel
 initLocalModel =
     { currentUser = Nothing
     , draft = ""
-    , filteringByOwner = Nothing
+    , filteringByOwner = AssignedToAny
     , errorMessage = Nothing
     , todoBeingEdited = Nothing
     , visibility = VisibilityAll
@@ -151,9 +157,12 @@ type SharedMsg
     = AddTodo TodoItem
     | UpdateTodo Int String
     | DeleteTodo Int
+    | AssignTodo Int (Maybe Person)
     | DeleteComplete
     | CheckTodo Int Bool
     | CheckAll Bool
+    | AddOwner Person
+    | RemoveOwner Person
 
 
 {-| Encodes shared messages to JSON.
@@ -180,6 +189,16 @@ encodeSharedMsg sharedModelMsg =
                   )
                 ]
 
+        AssignTodo id owner ->
+            Json.Encode.object
+                [ ( "assignTodo"
+                  , Json.Encode.object
+                        [ ( "id", Json.Encode.int id )
+                        , ( "owner", Json.Encode.Extra.maybe encodePerson owner )
+                        ]
+                  )
+                ]
+
         DeleteTodo id ->
             Json.Encode.object
                 [ ( "deleteTodo"
@@ -199,6 +218,16 @@ encodeSharedMsg sharedModelMsg =
                 [ ( "updateTodo"
                   , Json.Encode.object [ ( "id", Json.Encode.int id ), ( "task", Json.Encode.string task ) ]
                   )
+                ]
+
+        AddOwner owner ->
+            Json.Encode.object
+                [ ( "addOwner", encodePerson owner )
+                ]
+
+        RemoveOwner owner ->
+            Json.Encode.object
+                [ ( "removeOwner", encodePerson owner )
                 ]
 
 
@@ -232,6 +261,10 @@ decodeSharedMsg =
         , Json.Decode.map
             CheckAll
             (Json.Decode.at [ "checkAll", "isCompleted" ] Json.Decode.bool)
+        , Json.Decode.map2
+            AssignTodo
+            (Json.Decode.at [ "assignTodo", "id" ] Json.Decode.int)
+            (Json.Decode.at [ "assignTodo", "owner" ] (Json.Decode.maybe decodePerson))
         , Json.Decode.map
             DeleteTodo
             (Json.Decode.at [ "deleteTodo", "id" ] Json.Decode.int)
@@ -242,6 +275,8 @@ decodeSharedMsg =
             UpdateTodo
             (Json.Decode.at [ "updateTodo", "id" ] Json.Decode.int)
             (Json.Decode.at [ "updateTodo", "task" ] Json.Decode.string)
+        , Json.Decode.succeed AddOwner |> required "addOwner" decodePerson
+        , Json.Decode.succeed RemoveOwner |> required "removeOwner" decodePerson
         ]
 
 
@@ -287,6 +322,17 @@ updateShared msg model =
             in
             { model | todos = List.map checkEntry model.todos }
 
+        AssignTodo id owner ->
+            let
+                updateEntry t =
+                    if t.id == id then
+                        { t | owner = owner }
+
+                    else
+                        t
+            in
+            { model | todos = List.map updateEntry model.todos }
+
         DeleteTodo id ->
             { model | todos = List.filter (\t -> t.id /= id) model.todos }
 
@@ -304,6 +350,31 @@ updateShared msg model =
             in
             { model | todos = List.map updateEntry model.todos }
 
+        AddOwner newOwner ->
+            let
+                existingOwner =
+                    findOwner newOwner model.knownOwners
+            in
+            case existingOwner of
+                Just owner ->
+                    model
+
+                Nothing ->
+                    { model | knownOwners = newOwner :: model.knownOwners }
+
+        RemoveOwner existingOwner ->
+            let
+                filteredOwners =
+                    List.filter (\ko -> ko.name /= existingOwner.name) model.knownOwners
+            in
+            { model | knownOwners = filteredOwners }
+
+
+findOwner : Person -> List Person -> Maybe Person
+findOwner owner knownOwners =
+    List.filter (\ko -> ko.name == owner.name) knownOwners
+        |> List.head
+
 
 
 -- LOCAL UPDATE
@@ -320,7 +391,8 @@ type LocalMsg
     | UpdateEditingTodoItem String
     | StopEditingTodoItem
     | ChangeVisibility Visibility
-    | ChangeFilteredOwner (Maybe Person)
+    | ChangeFilteredOwner OwnerVisibility
+    | SetCurrentOwner Person
 
 
 updateLocal : LocalMsg -> LocalModel -> ( LocalModel, Cmd LocalMsg )
@@ -366,6 +438,9 @@ updateLocal msg model =
         UpdateField draft ->
             ( { model | draft = draft }, Cmd.none )
 
+        SetCurrentOwner owner ->
+            ( { model | currentUser = Just owner }, Cmd.none )
+
 
 type alias TodoAction =
     CloudModel.LocalOriginAction SharedMsg LocalMsg
@@ -384,9 +459,9 @@ view sharedModel localModel =
         [ errorMessage localModel.errorMessage
         , section
             [ class "todoapp" ]
-            [ lazy2 viewInput localModel.draft sharedModel.uid
-            , viewEntries localModel.todoBeingEdited localModel.filteringByOwner localModel.visibility sharedModel.todos
-            , lazy3 viewOwners localModel.filteringByOwner sharedModel.knownOwners sharedModel.todos
+            [ viewInput localModel.draft sharedModel.uid
+            , viewEntries localModel.currentUser localModel.todoBeingEdited localModel.filteringByOwner localModel.visibility sharedModel.todos
+            , viewOwners localModel.currentUser localModel.filteringByOwner sharedModel.knownOwners sharedModel.todos
             , lazy2 viewControls localModel.visibility sharedModel.todos
             ]
         , infoFooter
@@ -397,6 +472,19 @@ maybeOwnerToString : Maybe Person -> String
 maybeOwnerToString =
     Maybe.map (\owner -> owner.name)
         >> Maybe.withDefault unassignedStringConstant
+
+
+ownerVisibilityToString : OwnerVisibility -> String
+ownerVisibilityToString ownerVisibility =
+    case ownerVisibility of
+        AssignedToAny ->
+            "Any"
+
+        Unassigned ->
+            maybeOwnerToString Nothing
+
+        AssignedTo person ->
+            maybeOwnerToString (Just person)
 
 
 errorMessage : Maybe String -> Html msg
@@ -449,8 +537,8 @@ onEnter msg =
 -- VIEW ALL ENTRIES
 
 
-viewEntries : Maybe TodoBeingEdited -> Maybe Person -> Visibility -> List TodoItem -> Html TodoAction
-viewEntries maybeTodoBeingEdited filteringByOwner visibility entries =
+viewEntries : Maybe Person -> Maybe TodoBeingEdited -> OwnerVisibility -> Visibility -> List TodoItem -> Html TodoAction
+viewEntries currentUser maybeTodoBeingEdited filteringByOwner visibility entries =
     let
         isVisible todo =
             case visibility of
@@ -464,7 +552,15 @@ viewEntries maybeTodoBeingEdited filteringByOwner visibility entries =
                     True
 
         isVisibleForOwner todo =
-            todo.owner == filteringByOwner
+            case filteringByOwner of
+                AssignedToAny ->
+                    True
+
+                Unassigned ->
+                    todo.owner == Nothing
+
+                AssignedTo person ->
+                    todo.owner == Just person
 
         allCompleted =
             List.all .completed entries
@@ -492,7 +588,7 @@ viewEntries maybeTodoBeingEdited filteringByOwner visibility entries =
             [ for "toggle-all" ]
             [ text "Mark all as complete" ]
         , Keyed.ul [ class "todo-list" ] <|
-            List.map (viewKeyedTodoItem maybeTodoBeingEdited) (List.filter (\todo -> isVisible todo && isVisibleForOwner todo) entries)
+            List.map (viewKeyedTodoItem currentUser maybeTodoBeingEdited) (List.filter (\todo -> isVisible todo && isVisibleForOwner todo) entries)
         ]
 
 
@@ -500,13 +596,13 @@ viewEntries maybeTodoBeingEdited filteringByOwner visibility entries =
 -- VIEW INDIVIDUAL ENTRIES
 
 
-viewKeyedTodoItem : Maybe TodoBeingEdited -> TodoItem -> ( String, Html TodoAction )
-viewKeyedTodoItem maybeTodoBeingEdited todo =
-    ( String.fromInt todo.id, lazy2 viewTodoItem maybeTodoBeingEdited todo )
+viewKeyedTodoItem : Maybe Person -> Maybe TodoBeingEdited -> TodoItem -> ( String, Html TodoAction )
+viewKeyedTodoItem currentUser maybeTodoBeingEdited todo =
+    ( String.fromInt todo.id, lazy3 viewTodoItem currentUser maybeTodoBeingEdited todo )
 
 
-viewTodoItem : Maybe TodoBeingEdited -> TodoItem -> Html TodoAction
-viewTodoItem maybeTodoBeingEdited todo =
+viewTodoItem : Maybe Person -> Maybe TodoBeingEdited -> TodoItem -> Html TodoAction
+viewTodoItem currentUser maybeTodoBeingEdited todo =
     let
         ( isEditing, descriptionToShow ) =
             case maybeTodoBeingEdited of
@@ -536,7 +632,9 @@ viewTodoItem maybeTodoBeingEdited todo =
                     [ onDoubleClick (StartEditingTodoItem todo.id todo.description |> localAction) ]
                     [ text todo.description ]
                 , div
-                    [ classList [ ( "todo-owner", True ), ( "unassigned", todo.owner == Nothing ) ] ]
+                    [ classList [ ( "todo-owner", True ), ( "unassigned", todo.owner == Nothing ) ]
+                    , onDoubleClick (assignTodo currentUser todo)
+                    ]
                     [ text (maybeOwnerToString todo.owner) ]
                 ]
             , button
@@ -558,44 +656,97 @@ viewTodoItem maybeTodoBeingEdited todo =
         ]
 
 
+assignTodo : Maybe Person -> TodoItem -> TodoAction
+assignTodo currentUser todo =
+    let
+        assignee =
+            if currentUser == todo.owner then
+                Nothing
+
+            else
+                currentUser
+    in
+    AssignTodo todo.id assignee |> sharedAction
+
+
 
 -- VIEW OWNERS
 
 
-viewOwners : Maybe Person -> List Person -> List TodoItem -> Html TodoAction
-viewOwners filteringByOwner knownOwners entries =
+viewOwners : Maybe Person -> OwnerVisibility -> List Person -> List TodoItem -> Html TodoAction
+viewOwners currentUser filteringByOwner knownOwners entries =
     footer
-        [ class "footer"
+        [ class "owners-footer"
         , hidden (List.isEmpty entries)
         ]
-        [ lazy2 viewControlsOwnerFilters filteringByOwner knownOwners
+        [ viewCurrentOwner currentUser knownOwners
+        , lazy2 viewControlsOwnerFilters filteringByOwner knownOwners
         ]
 
 
-viewControlsOwnerFilters : Maybe Person -> List Person -> Html TodoAction
+viewCurrentOwner : Maybe Person -> List Person -> Html TodoAction
+viewCurrentOwner currentOwner knownOwners =
+    let
+        ( ownerNameValue, existingOwner ) =
+            case currentOwner of
+                Just owner ->
+                    ( owner.name, findOwner owner knownOwners )
+
+                Nothing ->
+                    ( "", Nothing )
+    in
+    case existingOwner of
+        Nothing ->
+            input
+                [ class "owner-name"
+                , placeholder "Who are you?"
+                , autofocus True
+                , value ownerNameValue
+                , name "currentOwner"
+                , onInput (\v -> SetCurrentOwner { name = v } |> localAction)
+                , onBlur (createOwner ownerNameValue)
+                , onEnter (createOwner ownerNameValue)
+                ]
+                []
+
+        Just owner ->
+            text owner.name
+
+
+createOwner : String -> TodoAction
+createOwner name =
+    if String.isEmpty name then
+        NoOp |> localAction
+
+    else
+        AddOwner { name = name } |> sharedAction
+
+
+viewControlsOwnerFilters : OwnerVisibility -> List Person -> Html TodoAction
 viewControlsOwnerFilters filteringByOwner knownOwners =
     let
         ownerNames =
-            List.map (\person -> Just person) knownOwners
+            List.sortBy .name knownOwners
+                |> List.map AssignedTo
 
         unassigendAndOwners =
-            [ Nothing ] ++ ownerNames
+            [ AssignedToAny, Unassigned ] ++ ownerNames
 
         ownerSwaps =
             List.map (\ownerName -> ownerSwap ownerName filteringByOwner) unassigendAndOwners
     in
     ul
-        [ class "filters" ]
+        [ class "filters owners-filters" ]
         (List.intersperse (text " ") ownerSwaps)
 
 
-ownerSwap : Maybe Person -> Maybe Person -> Html TodoAction
+ownerSwap : OwnerVisibility -> OwnerVisibility -> Html TodoAction
 ownerSwap owner filteringByOwner =
     li
         [ onClick (ChangeFilteredOwner owner |> localAction)
         ]
         [ a [ href "#/", classList [ ( "selected", owner == filteringByOwner ) ] ]
-            [ text (maybeOwnerToString owner) ]
+            [ text (ownerVisibilityToString owner) ]
         ]
 
 
