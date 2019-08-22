@@ -406,7 +406,7 @@ sendNextEvent :
     List (Event sharedMsg)
     -> (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
-    -> ClientEventId
+    -> EventId
     -> Cmd (CloudMsg sharedMsg localMsg)
 sendNextEvent pendingEvents proposal sharedMsgEncoder latestKnownEventId =
     List.head pendingEvents
