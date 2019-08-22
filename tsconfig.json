@@ -8,6 +8,6 @@
     "target": "es6"
   },
   "files": [
-    "client/js/index.ts",
+    "src/client/js/index.ts"
   ]
 }
