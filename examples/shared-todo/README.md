@@ -11,3 +11,11 @@ Unfortunately, there is not currently a way to clear the TODOs other than to re-
 - [ ] Improve code organization
 - [ ] Improve / add documentation
 - [ ] Add at least a few tests
+
+### Deploying
+Run the following from the root of the directory.
+```sh
+git push HEROKU_GIT_REMOTE_NAME `git subtree split --prefix examples/shared-todo master`:master --force
+```
+
+If you want to push a branch, rather than master, you can change the `master` inside of the subtree command to the branch name you want to push.
