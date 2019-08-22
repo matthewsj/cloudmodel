@@ -26,7 +26,7 @@ another similar server to manage communicating across all clients.
 
 # Creating a CloudModel program
 
-@docs CloudModelConfig, element, wrapAll
+@docs CloudModelConfig, element, wrapAll, RejectionStrategy
 
 
 # Convenience
@@ -219,10 +219,18 @@ type ControlMsg sharedMsg
     | Reject ClientEventId (List (Event sharedMsg))
 
 
+{-| If the client is ever behind the server, when it proposes a message for the event
+stream that message will be rejected. If that happens, we have to do something with
+any pending events that have not yet been accepted by the event stream. We have several options:
+  - DropAllPending: Removes any pending events. The user will have to redo their actions
+  - ReapplyAllPending: Replays all the pending events on top of the latest shared model.
+  - Custom: If the simple strategies do not work for you, you can instead
+            examine the list of pending events and the latest shared model, and return
+            a new list of pending events.
+-}
 type RejectionStrategy sharedModel sharedMsg
     = DropAllPending
     | ReapplyAllPending
-    | DropRejectedEvent
     | Custom (List (Event sharedMsg) -> SharedModelState sharedModel sharedMsg -> List (Event sharedMsg))
 
 
@@ -360,7 +368,7 @@ updateWithControlMsg :
     -> ( SharedModelState sharedModel sharedMsg, Cmd (CloudMsg sharedMsg localMsg) )
 updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy controlMsg model =
     case controlMsg of
-        -- TODO (YK 2019/08/2): Check that the accepted event id is what we anticipated
+        -- TODO (YK 2019/08/22): Check that the accepted event id is what we anticipated
         Accept eventId clientEventId ->
             case model.pendingEvents of
                 acceptedEvent :: pendingEvents ->
@@ -371,7 +379,7 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy co
                                 model.latestKnownSharedModel
                         , pendingEvents = pendingEvents
                       }
-                    , sendNextEvent
+                    , proposeNextPendingEvent
                         pendingEvents
                         proposal
                         sharedMsgEncoder
@@ -379,7 +387,7 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy co
                     )
 
                 _ ->
-                    -- TODO (YK 2019/08/2): Log an error if we received an Accept w/o any pending events
+                    -- TODO (YK 2019/08/22): Log an error if we received an Accept w/o any pending events
                     ( model, Cmd.none )
 
         Reject clientId newerEvents ->
@@ -401,14 +409,15 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy co
             in
             applyRejectionStrategy rejectionStrategy model.pendingEvents proposal sharedMsgEncoder (clientId + 1) caughtUpModel
 
-
-sendNextEvent :
+{-| Helper method for proposing the next pending event, if one exists.
+-}
+proposeNextPendingEvent :
     List (Event sharedMsg)
     -> (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
     -> EventId
     -> Cmd (CloudMsg sharedMsg localMsg)
-sendNextEvent pendingEvents proposal sharedMsgEncoder latestKnownEventId =
+proposeNextPendingEvent pendingEvents proposal sharedMsgEncoder latestKnownEventId =
     List.head pendingEvents
         |> Maybe.map
             (\nextEventToSend ->
@@ -421,6 +430,11 @@ sendNextEvent pendingEvents proposal sharedMsgEncoder latestKnownEventId =
         |> Maybe.withDefault Cmd.none
 
 
+{-| This method takes care of updating the SharedModelState with the list of
+pending events we should keep, given the specified RejectionStrategy. If the list
+of pending events to keep is non-empty, the first of those pending events will
+be proposed to the server.
+-}
 applyRejectionStrategy :
     RejectionStrategy sharedModel sharedMsg
     -> List (Event sharedMsg)
@@ -439,16 +453,11 @@ applyRejectionStrategy rejectionStrategy pendingEvents proposal sharedMsgEncoder
                 ReapplyAllPending ->
                     pendingEvents
 
-                DropRejectedEvent ->
-                    case pendingEvents of
-                        _::rest -> rest
-                        [] -> []
-
                 Custom pendingEventsHandler ->
                     pendingEventsHandler pendingEvents caughtUpModel
     in
     ( { caughtUpModel | pendingEvents = resultingPendingEvents }
-    , sendNextEvent
+    , proposeNextPendingEvent
         resultingPendingEvents
         proposal
         sharedMsgEncoder
