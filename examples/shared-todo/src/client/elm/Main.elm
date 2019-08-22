@@ -303,7 +303,10 @@ updateShared : SharedMsg -> SharedModel -> SharedModel
 updateShared msg model =
     case msg of
         AddTodo newTodo ->
-            { model | todos = List.append model.todos [ newTodo ], uid = newTodo.id + 1 }
+            let newUid = model.uid + 1
+                newTodoWithLatestId = { newTodo | id = newUid }
+            in
+            { model | todos = List.append model.todos [ newTodoWithLatestId ], uid = newUid }
 
         CheckTodo id isCompleted ->
             let
@@ -460,7 +463,7 @@ view sharedModel localModel =
         [ errorMessage localModel.errorMessage
         , section
             [ class "todoapp" ]
-            [ viewInput localModel.draft sharedModel.uid
+            [ viewInput localModel.draft
             , viewEntries localModel.currentUser localModel.todoBeingEdited localModel.filteringByOwner localModel.visibility sharedModel.todos
             , viewOwners localModel.currentUser localModel.filteringByOwner sharedModel.knownOwners sharedModel.todos
             , lazy2 viewControls localModel.visibility sharedModel.todos
@@ -498,8 +501,8 @@ errorMessage maybeError =
             Html.text ""
 
 
-viewInput : String -> Int -> Html TodoAction
-viewInput task uid =
+viewInput : String -> Html TodoAction
+viewInput task =
     header
         [ class "header" ]
         [ h1 [] [ text "todos" ]
@@ -510,15 +513,15 @@ viewInput task uid =
             , value task
             , name "newTodo"
             , onInput (UpdateField >> localAction)
-            , onEnter { localMsg = Just (UpdateField ""), proposedEvent = Just (AddTodo (createNewTodo task uid)) }
+            , onEnter { localMsg = Just (UpdateField ""), proposedEvent = Just (AddTodo (createNewTodo task)) }
             ]
             []
         ]
 
 
-createNewTodo : String -> Int -> TodoItem
-createNewTodo description id =
-    { description = description, completed = False, id = id, owner = Nothing }
+createNewTodo : String -> TodoItem
+createNewTodo description =
+    { description = description, completed = False, id = -1, owner = Nothing }
 
 
 onEnter : TodoAction -> Html.Attribute TodoAction
