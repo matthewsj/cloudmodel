@@ -8,11 +8,11 @@
   },
   "scripts": {
     "build": "webpack --mode production",
-    "start": "npm run build && npm run server",
-    "heroku_serve": "npx cloudmodel_serve --static_dir='dist' --port=$PORT",
     "client": "webpack-dev-server --mode development --devtool inline-source-map --hot",
+    "dev": "concurrently \"npx cloudmodel_serve\" \"npm run client\"",
+    "heroku_serve": "npx cloudmodel_serve --static_dir='dist' --port=$PORT",
     "server": "npx cloudmodel_serve --static_dir='dist'",
-    "dev": "concurrently \"npx cloudmodel_serve\" \"npm run client\""
+    "start": "npm run build && npm run server"
   },
   "author": "Jacob Matthews",
   "license": "MIT",
