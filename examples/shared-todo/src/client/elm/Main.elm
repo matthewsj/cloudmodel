@@ -1,7 +1,7 @@
 port module Main exposing (main)
 
 import Browser.Dom as Dom
-import CloudModel exposing (localAction, sharedAction)
+import CloudModel exposing (localAction, sharedAction, RejectionStrategy(..))
 import Html exposing (Html, a, button, div, footer, h1, header, input, label, li, p, section, span, strong, text, ul)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onBlur, onClick, onDoubleClick, onInput)
@@ -24,6 +24,7 @@ main =
         , sharedMsgEncoder = encodeSharedMsg
         , displayError = \s -> DisplayError s
         , init = init
+        , rejectionStrategy = ReapplyAllPending
         , updateCloud = updateShared
         , updateLocal = updateLocal
         , subscriptions = \_ _ -> Sub.none
