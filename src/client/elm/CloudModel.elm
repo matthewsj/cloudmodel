@@ -1,7 +1,7 @@
 module CloudModel exposing
     ( CloudModelConfig, element, wrapAll
     , localAction, sharedAction
-    , CloudModel, CloudMsg, LocalOriginAction
+    , CloudModel, CloudMsg, LocalOriginAction, RejectionStrategy(..)
     )
 
 {-| This module provides an abstraction for "shared-workspace" web applications where multiple
@@ -51,6 +51,7 @@ type alias CloudModelConfig sharedModel localModel sharedMsg localMsg flags =
     , sharedMsgEncoder : sharedMsg -> Json.Decode.Value
     , displayError : String -> localMsg
     , init : flags -> ( sharedModel, localModel, Cmd localMsg )
+    , rejectionStrategy : RejectionStrategy sharedModel sharedMsg
     , updateCloud : sharedMsg -> sharedModel -> sharedModel
     , updateLocal : localMsg -> localModel -> ( localModel, Cmd localMsg )
     , subscriptions : sharedModel -> localModel -> Sub localMsg
@@ -93,13 +94,14 @@ wrapAll :
             -> Sub (CloudMsg sharedMsg localMsg)
         , view : CloudModel sharedModel sharedMsg localModel -> Html (CloudMsg sharedMsg localMsg)
         }
-wrapAll { sharedMsgDecoder, sharedMsgEncoder, displayError, init, updateCloud, updateLocal, subscriptions, view, proposal, proposalResponse, receiveEvents } =
+wrapAll { sharedMsgDecoder, sharedMsgEncoder, displayError, init, updateCloud, rejectionStrategy, updateLocal, subscriptions, view, proposal, proposalResponse, receiveEvents } =
     { init = buildInit init
     , update =
         buildCloudUpdate proposal
             sharedMsgEncoder
             updateCloud
             updateLocal
+            rejectionStrategy
     , subscriptions =
         buildSubscriptions proposalResponse
             receiveEvents
@@ -170,7 +172,10 @@ buildInit clientInit flags =
     )
 
 
+
 -- Q (YK 2019/03/15): Should this also take a latest known event id or will the sharedModel always be empty?
+
+
 initSharedModelState : sharedModel -> SharedModelState sharedModel sharedMsg
 initSharedModelState initLatestKnownSharedModel =
     { latestKnownEventId = 0
@@ -214,6 +219,13 @@ type ControlMsg sharedMsg
     | Reject ClientEventId (List (Event sharedMsg))
 
 
+type RejectionStrategy sharedModel sharedMsg
+    = DropAllPending
+    | ReapplyAllPending
+    | DropRejectedEvent
+    | Custom (List (Event sharedMsg) -> SharedModelState sharedModel sharedMsg -> List (Event sharedMsg))
+
+
 {-| The overall message type this program will use, which can be either a
 local message, a remote message to be applied to our shared model, or a
 control message in response to one of our proposals.
@@ -234,10 +246,11 @@ buildCloudUpdate :
     -> (sharedMsg -> Json.Encode.Value)
     -> (sharedMsg -> sharedModel -> sharedModel)
     -> (localMsg -> localModel -> ( localModel, Cmd localMsg ))
+    -> RejectionStrategy sharedModel sharedMsg
     -> CloudMsg sharedMsg localMsg
     -> CloudModel sharedModel sharedMsg localModel
     -> ( CloudModel sharedModel sharedMsg localModel, Cmd (CloudMsg sharedMsg localMsg) )
-buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model =
+buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn rejectionStrategy msg model =
     case msg of
         LocalOrigin { localMsg, proposedEvent } ->
             let
@@ -261,17 +274,18 @@ buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model 
             )
 
         RemoteOrigin events ->
-            let newEvents =
+            let
+                newEvents =
                     List.filter (\event -> event.id > model.sharedModelInfo.latestKnownEventId) events
             in
-                ( { model
-                    | sharedModelInfo =
-                        List.foldl (updateSharedRemoteModelOrigin coreUpdateFn)
-                            model.sharedModelInfo
-                            newEvents
-                }
-                , Cmd.none
-                )
+            ( { model
+                | sharedModelInfo =
+                    List.foldl (updateSharedRemoteModelOrigin coreUpdateFn)
+                        model.sharedModelInfo
+                        newEvents
+              }
+            , Cmd.none
+            )
 
         ControlMsg controlMsg ->
             let
@@ -279,6 +293,7 @@ buildCloudUpdate proposal sharedMsgEncoder coreUpdateFn updateLocalFn msg model 
                     updateWithControlMsg proposal
                         sharedMsgEncoder
                         coreUpdateFn
+                        rejectionStrategy
                         controlMsg
                         model.sharedModelInfo
             in
@@ -339,12 +354,13 @@ updateWithControlMsg :
     (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
     -> (sharedMsg -> Json.Encode.Value)
     -> (sharedMsg -> sharedModel -> sharedModel)
+    -> RejectionStrategy sharedModel sharedMsg
     -> ControlMsg sharedMsg
     -> SharedModelState sharedModel sharedMsg
     -> ( SharedModelState sharedModel sharedMsg, Cmd (CloudMsg sharedMsg localMsg) )
-updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model =
+updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy controlMsg model =
     case controlMsg of
-        -- Q (YK 2019/03/15): It looks like `clientEventId` is unused?
+        -- TODO (YK 2019/08/2): Check that the accepted event id is what we anticipated
         Accept eventId clientEventId ->
             case model.pendingEvents of
                 acceptedEvent :: pendingEvents ->
@@ -355,38 +371,89 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn controlMsg model =
                                 model.latestKnownSharedModel
                         , pendingEvents = pendingEvents
                       }
-                    , List.head pendingEvents
-                        |> Maybe.map
-                            (\nextEventToSend ->
-                                proposeEvent proposal
-                                    sharedMsgEncoder
-                                    nextEventToSend.msg
-                                    eventId
-                                    nextEventToSend.id
-                            )
-                        |> Maybe.withDefault Cmd.none
+                    , sendNextEvent
+                        pendingEvents
+                        proposal
+                        sharedMsgEncoder
+                        eventId
                     )
 
                 _ ->
+                    -- TODO (YK 2019/08/2): Log an error if we received an Accept w/o any pending events
                     ( model, Cmd.none )
 
         Reject clientId newerEvents ->
             let
                 latest =
                     List.head (List.reverse newerEvents)
+
+                caughtUpModel =
+                    { model
+                        | latestKnownEventId =
+                            Maybe.map .id latest
+                                |> Maybe.withDefault model.latestKnownEventId
+                        , latestKnownSharedModel =
+                            List.foldl coreUpdateFn
+                                model.latestKnownSharedModel
+                                (List.map .msg newerEvents)
+                        , pendingEvents = []
+                    }
             in
-            ( { model
-                | latestKnownEventId =
-                    Maybe.map .id latest
-                        |> Maybe.withDefault model.latestKnownEventId
-                , latestKnownSharedModel =
-                    List.foldl coreUpdateFn
-                        model.latestKnownSharedModel
-                        (List.map .msg newerEvents)
-                , pendingEvents = []
-              }
-            , Cmd.none
+            applyRejectionStrategy rejectionStrategy model.pendingEvents proposal sharedMsgEncoder (clientId + 1) caughtUpModel
+
+
+sendNextEvent :
+    List (Event sharedMsg)
+    -> (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
+    -> (sharedMsg -> Json.Encode.Value)
+    -> ClientEventId
+    -> Cmd (CloudMsg sharedMsg localMsg)
+sendNextEvent pendingEvents proposal sharedMsgEncoder latestKnownEventId =
+    List.head pendingEvents
+        |> Maybe.map
+            (\nextEventToSend ->
+                proposeEvent proposal
+                    sharedMsgEncoder
+                    nextEventToSend.msg
+                    latestKnownEventId
+                    nextEventToSend.id
             )
+        |> Maybe.withDefault Cmd.none
+
+
+applyRejectionStrategy :
+    RejectionStrategy sharedModel sharedMsg
+    -> List (Event sharedMsg)
+    -> (Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg))
+    -> (sharedMsg -> Json.Encode.Value)
+    -> ClientEventId
+    -> SharedModelState sharedModel sharedMsg
+    -> ( SharedModelState sharedModel sharedMsg, Cmd (CloudMsg sharedMsg localMsg) )
+applyRejectionStrategy rejectionStrategy pendingEvents proposal sharedMsgEncoder clientEventId caughtUpModel =
+    let
+        resultingPendingEvents =
+            case rejectionStrategy of
+                DropAllPending ->
+                    []
+
+                ReapplyAllPending ->
+                    pendingEvents
+
+                DropRejectedEvent ->
+                    case pendingEvents of
+                        _::rest -> rest
+                        [] -> []
+
+                Custom pendingEventsHandler ->
+                    pendingEventsHandler pendingEvents caughtUpModel
+    in
+    ( { caughtUpModel | pendingEvents = resultingPendingEvents }
+    , sendNextEvent
+        resultingPendingEvents
+        proposal
+        sharedMsgEncoder
+        caughtUpModel.latestKnownEventId
+    )
 
 
 {-| Constructs a projected version of the shared model assuming all
