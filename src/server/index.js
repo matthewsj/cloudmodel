@@ -76,11 +76,12 @@ io.on('connection', function (socket) {
   });
 });
 
-http.listen(parsedArgs.port, function () {
+const PORT = process.env.PORT || parsedArgs.port;
+http.listen(PORT, function () {
   if (parsedArgs.static_dir) {
-    console.log(`Serving from ${parsedArgs.static_dir} listening on port *:${parsedArgs.port}`);
+    console.log(`Serving from ${parsedArgs.static_dir} listening on port *:${PORT}`);
   } else {
-    console.log(`Socket server is listening on port *:${parsedArgs.port}`)
+    console.log(`Socket server is listening on port *:${PORT}`)
   }
 });
 
