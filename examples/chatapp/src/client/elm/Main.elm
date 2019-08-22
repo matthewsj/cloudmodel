@@ -1,6 +1,6 @@
 port module Main exposing (main)
 
-import CloudModel exposing (localAction)
+import CloudModel exposing (localAction, RejectionStrategy(..))
 import Html exposing (Html, button, div, input, li, text, ul)
 import Html.Attributes exposing (..)
 import Html.Events exposing (onClick, onInput)
@@ -19,6 +19,7 @@ main =
         , sharedMsgEncoder = encodeSharedMsg
         , displayError = DisplayError
         , init = init
+        , rejectionStrategy = ReapplyAllPending
         , updateCloud = updateShared
         , updateLocal = updateLocal
         , subscriptions = \_ _ -> Sub.none
