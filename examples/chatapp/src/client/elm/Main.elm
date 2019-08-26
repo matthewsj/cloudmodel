@@ -17,7 +17,7 @@ main =
     CloudModel.element
         { sharedMsgDecoder = decodeSharedMsg
         , sharedMsgEncoder = encodeSharedMsg
-        , displayError = DisplayError
+        , onDecodeError = DecodeError
         , init = init
         , rejectionStrategy = ReapplyAllPending
         , updateCloud = updateShared
@@ -133,7 +133,7 @@ issue commands.
 -}
 type LocalChatMsg
     = ChangeDraft String
-    | DisplayError String
+    | DecodeError String
 
 
 updateLocal : LocalChatMsg -> LocalModel -> ( LocalModel, Cmd msg )
@@ -142,7 +142,7 @@ updateLocal msg model =
         ChangeDraft draft ->
             ( { model | draft = draft }, Cmd.none )
 
-        DisplayError error ->
+        DecodeError error ->
             ( { model | errorMessage = Just error }, Cmd.none )
 
 

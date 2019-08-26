@@ -22,7 +22,7 @@ main =
     CloudModel.element
         { sharedMsgDecoder = decodeSharedMsg
         , sharedMsgEncoder = encodeSharedMsg
-        , displayError = \s -> DisplayError s
+        , onDecodeError = \s -> DecodeError s
         , init = init
         , rejectionStrategy = ReapplyAllPending
         , updateCloud = updateShared
@@ -389,7 +389,7 @@ issue commands.
 -}
 type LocalMsg
     = NoOp
-    | DisplayError String
+    | DecodeError String
     | UpdateField String
     | StartEditingTodoItem Int String
     | UpdateEditingTodoItem String
@@ -411,7 +411,7 @@ updateLocal msg model =
         ChangeFilteredOwner filteringByOwner ->
             ( { model | filteringByOwner = filteringByOwner }, Cmd.none )
 
-        DisplayError error ->
+        DecodeError error ->
             ( { model | errorMessage = Just error }, Cmd.none )
 
         StartEditingTodoItem id description ->

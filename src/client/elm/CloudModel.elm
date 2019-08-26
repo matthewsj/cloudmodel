@@ -49,7 +49,7 @@ a `Model` type and a `Msg` type, cloud model based applications have both a `Sha
 type alias CloudModelConfig sharedModel localModel sharedMsg localMsg flags =
     { sharedMsgDecoder : Json.Decode.Decoder sharedMsg
     , sharedMsgEncoder : sharedMsg -> Json.Decode.Value
-    , displayError : String -> localMsg
+    , onDecodeError : String -> localMsg
     , init : flags -> ( sharedModel, localModel, Cmd localMsg )
     , rejectionStrategy : RejectionStrategy sharedModel sharedMsg
     , updateCloud : sharedMsg -> sharedModel -> sharedModel
@@ -94,7 +94,7 @@ wrapAll :
             -> Sub (CloudMsg sharedMsg localMsg)
         , view : CloudModel sharedModel sharedMsg localModel -> Html (CloudMsg sharedMsg localMsg)
         }
-wrapAll { sharedMsgDecoder, sharedMsgEncoder, displayError, init, updateCloud, rejectionStrategy, updateLocal, subscriptions, view, proposal, proposalResponse, receiveEvents } =
+wrapAll { sharedMsgDecoder, sharedMsgEncoder, onDecodeError, init, updateCloud, rejectionStrategy, updateLocal, subscriptions, view, proposal, proposalResponse, receiveEvents } =
     { init = buildInit init
     , update =
         buildCloudUpdate proposal
@@ -106,7 +106,7 @@ wrapAll { sharedMsgDecoder, sharedMsgEncoder, displayError, init, updateCloud, r
         buildSubscriptions proposalResponse
             receiveEvents
             sharedMsgDecoder
-            displayError
+            onDecodeError
             subscriptions
     , view = constructCloudView updateCloud view
     }
@@ -511,13 +511,13 @@ buildSubscriptions :
     -> (sharedModel -> localModel -> Sub localMsg)
     -> CloudModel sharedModel sharedMsg localModel
     -> Sub (CloudMsg sharedMsg localMsg)
-buildSubscriptions proposalResponse receiveEvents sharedMsgDecoder displayErrorFn subscriptionFn { sharedModelInfo, localModel } =
+buildSubscriptions proposalResponse receiveEvents sharedMsgDecoder onDecodeErrorFn subscriptionFn { sharedModelInfo, localModel } =
     let
         localSubscriptions =
             subscriptionFn sharedModelInfo.latestKnownSharedModel localModel
 
         handleDecodeFailure errorMessage =
-            LocalOrigin (localAction (displayErrorFn errorMessage))
+            LocalOrigin (localAction (onDecodeErrorFn errorMessage))
     in
     Sub.batch
         [ proposalResponse
