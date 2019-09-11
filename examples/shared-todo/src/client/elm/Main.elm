@@ -6,7 +6,7 @@ import Html exposing (Html, a, button, div, footer, h1, header, input, label, li
 import Html.Attributes exposing (..)
 import Html.Events exposing (onBlur, onClick, onDoubleClick, onInput)
 import Html.Keyed as Keyed
-import Html.Lazy exposing (lazy, lazy2, lazy3)
+import Html.Lazy exposing (lazy, lazy2, lazy3, lazy4)
 import Json.Decode exposing (Decoder)
 import Json.Decode.Pipeline exposing (required)
 import Json.Encode
@@ -472,52 +472,65 @@ view sharedModel localModel =
         , style "visibility" "hidden"
         ]
         [ errorMessage localModel.errorMessage
-        , ownerInputOrApp sharedModel localModel
+        , ownerManagementOrApp sharedModel localModel
         , infoFooter
         ]
 
 
-ownerInputOrApp : SharedModel -> LocalModel -> Html TodoAction
-ownerInputOrApp sharedModel localModel =
+ownerManagementOrApp : SharedModel -> LocalModel -> Html TodoAction
+ownerManagementOrApp sharedModel localModel =
     case localModel.currentUser of
         Nothing ->
-            let
-                existingOwners =
-                    List.map
-                        (\owner ->
-                            li
-                                [ onClick (SetCurrentOwner owner |> localAction)
-                                ]
-                                [ a [ href "#/", classList [] ]
-                                    [ text owner.name ]
-                                ]
-                        )
-                        sharedModel.knownOwners
-            in
-            div
-                []
-                [ input
-                    [ class "owner-name"
-                    , placeholder "Who are you?"
-                    , autofocus True
-                    , value localModel.currentUserField
-                    , name "currentOwner"
-                    , onInput (UpdateCurrentOwnerField >> localAction)
-                    , onBlur (createOwner localModel.currentUserField)
-                    , onEnter (createOwner localModel.currentUserField)
-                    ]
-                    []
-                , ul [] existingOwners
-                ]
+            ownerManagement sharedModel localModel
 
         Just currentUser ->
             section
                 [ class "todoapp" ]
                 [ viewInput localModel.draft
                 , viewEntries currentUser localModel.todoBeingEdited localModel.filteringByOwner localModel.visibility sharedModel.todos
-                , viewOwners currentUser localModel.filteringByOwner sharedModel.knownOwners sharedModel.todos
+                , lazy4 viewOwners currentUser localModel.filteringByOwner sharedModel.knownOwners sharedModel.todos
                 , lazy2 viewControls localModel.visibility sharedModel.todos
                 ]
+
+
+ownerManagement : SharedModel -> LocalModel -> Html TodoAction
+ownerManagement sharedModel localModel =
+    let
+        existingOwners =
+            List.map
+                (\owner ->
+                    li
+                        [ class "existing-owner " ]
+                        [ a [ href "#/", classList [], onClick (SetCurrentOwner owner |> localAction) ]
+                            [ text owner.name ]
+                        , button
+                            [ class "destroy"
+                            ]
+                            []
+                        ]
+                )
+                sharedModel.knownOwners
+    in
+    section
+        [ class "todoapp" ]
+        [ header [ class "header" ] [ headerText ]
+        , div [ class "owner-selection" ]
+            [ input
+                [ class "owner-name"
+                , placeholder "Who are you?"
+                , autofocus True
+                , value localModel.currentUserField
+                , name "currentOwner"
+                , onInput (UpdateCurrentOwnerField >> localAction)
+                , onBlur (createOwner localModel.currentUserField)
+                , onEnter (createOwner localModel.currentUserField)
+                ]
+                []
+            , ul
+                [ class "existing-owners" ]
+                ([ div [ class "existing-owners-header" ] [ text "Or select an existing user" ] ] ++ existingOwners)
+            ]
+        ]
 
 
 maybeOwnerToString : Maybe Person -> String
@@ -556,7 +569,7 @@ viewInput : String -> Html TodoAction
 viewInput task =
     header
         [ class "header" ]
-        [ h1 [] [ text "todos" ]
+        [ headerText
         , input
             [ class "new-todo"
             , placeholder "What needs to be done?"
@@ -568,6 +581,11 @@ viewInput task =
             ]
             []
         ]
+
+
+headerText : Html TodoAction
+headerText =
+    h1 [ class "todos-header" ] [ text "todos" ]
 
 
 createNewTodo : String -> TodoItem
