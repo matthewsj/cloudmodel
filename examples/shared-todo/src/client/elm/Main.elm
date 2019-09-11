@@ -335,9 +335,24 @@ updateShared msg model =
 
         AssignTodo id owner ->
             let
+                -- Only assign the owner if it's a known owner
+                -- TODO: Handle a "logged-in" owner being removed (or prevent it)
+                ownerToAssign =
+                    case owner of
+                        Nothing ->
+                            Nothing
+
+                        Just o ->
+                            case findOwner o model.knownOwners of
+                                Nothing ->
+                                    Nothing
+
+                                Just existingOwner ->
+                                    Just existingOwner
+
                 updateEntry t =
                     if t.id == id then
-                        { t | owner = owner }
+                        { t | owner = ownerToAssign }
 
                     else
                         t
@@ -377,8 +392,27 @@ updateShared msg model =
             let
                 filteredOwners =
                     List.filter (\ko -> ko.name /= existingOwner.name) model.knownOwners
+
+                todos =
+                    List.map
+                        (\todo ->
+                            case todo.owner of
+                                Nothing ->
+                                    todo
+
+                                Just owner ->
+                                    if owner.name == existingOwner.name then
+                                        { todo | owner = Nothing }
+
+                                    else
+                                        todo
+                        )
+                        model.todos
             in
-            { model | knownOwners = filteredOwners }
+            { model
+                | knownOwners = filteredOwners
+                , todos = todos
+            }
 
 
 findOwner : Person -> List Person -> Maybe Person
@@ -500,11 +534,16 @@ ownerManagement sharedModel localModel =
             List.map
                 (\owner ->
                     li
-                        [ class "existing-owner " ]
-                        [ a [ href "#/", classList [], onClick (SetCurrentOwner owner |> localAction) ]
+                        [ class "existing-owner" ]
+                        [ a
+                            [ href "#/"
+                            , classList []
+                            , onClick (SetCurrentOwner owner |> localAction)
+                            ]
                             [ text owner.name ]
                         , button
                             [ class "destroy"
+                            , onClick (RemoveOwner owner |> sharedAction)
                             ]
                             []
                         ]
@@ -527,7 +566,7 @@ ownerManagement sharedModel localModel =
                 ]
                 []
             , ul
-                [ class "existing-owners" ]
+                [ class "existing-owners", hidden (List.isEmpty sharedModel.knownOwners) ]
                 ([ div [ class "existing-owners-header" ] [ text "Or select an existing user" ] ] ++ existingOwners)
             ]
         ]
@@ -755,7 +794,8 @@ viewOwners currentUser filteringByOwner knownOwners entries =
         [ class "owners-footer"
         , hidden (List.isEmpty entries)
         ]
-        [ lazy3 viewControlsOwnerFilters currentUser filteringByOwner knownOwners
+        [ text ("You are: " ++ currentUser.name)
+        , lazy3 viewControlsOwnerFilters currentUser filteringByOwner knownOwners
         ]
 
 
