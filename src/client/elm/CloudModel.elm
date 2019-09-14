@@ -425,8 +425,10 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy co
                     -- TODO (YK 2019/08/22): Log an error if we received an Accept w/o any pending events
                     ( model, Cmd.none )
 
-        Reject clientId newerEvents ->
+        Reject clientId unfilteredNewerEvents ->
             let
+                newerEvents = List.filter (\event -> event.id > model.latestKnownEventId) unfilteredNewerEvents
+
                 latest =
                     List.head (List.reverse newerEvents)
 
