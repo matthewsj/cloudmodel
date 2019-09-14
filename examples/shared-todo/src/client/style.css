@@ -50,10 +50,10 @@ input[type="checkbox"] {
 
 .todoapp {
     background: #fff;
-    margin: 130px 0 40px 0;
-    position: relative;
     box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.2),
                 0 25px 50px 0 rgba(0, 0, 0, 0.1);
+    margin: 130px 0 40px 0;
+    position: relative;
 }
 
 .todoapp input::-webkit-input-placeholder {
@@ -74,7 +74,7 @@ input[type="checkbox"] {
     color: #e6e6e6;
 }
 
-.todoapp h1 {
+.todos-header {
     position: absolute;
     top: -155px;
     width: 100%;
@@ -88,7 +88,8 @@ input[type="checkbox"] {
 }
 
 .new-todo,
-.edit {
+.edit,
+.owner-name {
     position: relative;
     margin: 0;
     width: 100%;
@@ -108,7 +109,8 @@ input[type="checkbox"] {
     font-smoothing: antialiased;
 }
 
-.new-todo {
+.new-todo,
+.owner-name {
     padding: 16px 16px 16px 60px;
     border: none;
     background: rgba(0, 0, 0, 0.003);
@@ -237,6 +239,61 @@ label[for='toggle-all'] {
     color: #d9d9d9;
 }
 
+.existing-owners {
+    background-color: white;
+    border-top: 1px solid #e6e6e6;
+    list-style: none;
+    margin: 0;
+    padding: 15px 0;
+    width: 100%;
+}
+
+.existing-owners-header {
+    color: #bfbfbf;
+    font-size: 20px;
+    margin-bottom: 12px;
+    text-align: center;
+    width: 100%;
+}
+
+.existing-owner {
+    border-bottom: 1px solid #e6e6e6;
+    font-size: 18px;
+    padding: 12px 0;
+    margin: 0 12px;
+    position: relative;
+}
+
+.existing-owner:first-of-type {
+    border-top: 1px solid #e6e6e6;
+}
+
+.existing-owner .destroy {
+    display: none;
+    position: absolute;
+    top: 0;
+    right: 10px;
+    bottom: 0;
+    width: 40px;
+    height: 40px;
+    font-size: 30px;
+    color: #cc9a9a;
+    margin-bottom: 11px;
+    transition: color 0.2s ease-out;
+}
+
+.existing-owner .destroy:hover {
+    color: #af5b5e;
+}
+
+.existing-owner .destroy:after {
+    content: '×';
+}
+
+.existing-owner:hover .destroy {
+    display: block;
+}
+
 .owners-footer {
     color: #777;
     padding: 10px 15px;
@@ -246,8 +303,8 @@ label[for='toggle-all'] {
     display: flex;
 }
 
-.owner-name {
-    flex: 0 0 auto;
+.owners-footer[hidden] {
+    display: none
 }
 
 .todo-list li.completed label {
