@@ -20,18 +20,26 @@ import Task
 
 main =
     CloudModel.element
-        { sharedMsgDecoder = decodeSharedMsg
-        , sharedMsgEncoder = encodeSharedMsg
-        , onDecodeError = \s -> DecodeError s
-        , init = init
-        , rejectionStrategy = ReapplyAllPending
-        , updateCloud = updateShared
-        , updateLocal = updateLocal
-        , subscriptions = \_ _ -> Sub.none
-        , view = view
-        , proposal = proposal
-        , proposalResponse = proposalResponse
-        , receiveEvents = receiveEvents
+        { sharedMsgEncoding =
+            { decoder = decodeSharedMsg
+            , encoder = encodeSharedMsg
+            , onDecodeError = \s -> DecodeError s
+            }
+        , application =
+            { init = init
+            , updateCloud = updateShared
+            , updateLocal = updateLocal
+            , subscriptions = \_ _ -> Sub.none
+            , view = view
+            }
+        , ports =
+            { proposal = proposal
+            , proposalResponse = proposalResponse
+            , receiveEvents = receiveEvents
+            }
+        , options =
+            { rejectionStrategy = ReapplyAllPending
+            }
         }
 
 
