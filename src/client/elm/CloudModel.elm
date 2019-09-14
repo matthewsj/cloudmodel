@@ -1,7 +1,7 @@
 module CloudModel exposing
-    ( CloudModelConfig, element, wrapAll
+    ( CloudModelConfig, element, wrapAll, RejectionStrategy(..)
     , localAction, sharedAction
-    , CloudModel, CloudMsg, LocalOriginAction, RejectionStrategy(..)
+    , CloudModel, CloudMsg, LocalOriginAction
     )
 
 {-| This module provides an abstraction for "shared-workspace" web applications where multiple
@@ -47,22 +47,42 @@ a `Model` type and a `Msg` type, cloud model based applications have both a `Sha
 `LocalModel`, and corresponding `SharedMsg` and `LocalMsg`s that interact with them.
 -}
 type alias CloudModelConfig sharedModel localModel sharedMsg localMsg flags =
-    { sharedMsgDecoder : Json.Decode.Decoder sharedMsg
-    , sharedMsgEncoder : sharedMsg -> Json.Decode.Value
-    , onDecodeError : String -> localMsg
-    , init : flags -> ( sharedModel, localModel, Cmd localMsg )
-    , rejectionStrategy : RejectionStrategy sharedModel sharedMsg
+    { application : ApplicationBase sharedModel localModel sharedMsg localMsg flags
+    , options : CloudModelOptions sharedModel sharedMsg
+    , ports : CloudModelPorts sharedMsg localMsg
+    , sharedMsgEncoding : SharedMsgEncoding sharedMsg localMsg
+    }
+
+
+type alias ApplicationBase sharedModel localModel sharedMsg localMsg flags =
+    { init : flags -> ( sharedModel, localModel, Cmd localMsg )
+    , subscriptions : sharedModel -> localModel -> Sub localMsg
     , updateCloud : sharedMsg -> sharedModel -> sharedModel
     , updateLocal : localMsg -> localModel -> ( localModel, Cmd localMsg )
-    , subscriptions : sharedModel -> localModel -> Sub localMsg
     , view : sharedModel -> localModel -> Html (LocalOriginAction sharedMsg localMsg)
-    , proposal : Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg)
+    }
+
+
+type alias CloudModelPorts sharedMsg localMsg =
+    { proposal : Json.Encode.Value -> Cmd (CloudMsg sharedMsg localMsg)
     , proposalResponse :
         (Json.Decode.Value -> CloudMsg sharedMsg localMsg)
         -> Sub (CloudMsg sharedMsg localMsg)
     , receiveEvents :
         (Json.Decode.Value -> CloudMsg sharedMsg localMsg)
         -> Sub (CloudMsg sharedMsg localMsg)
+    }
+
+
+type alias SharedMsgEncoding sharedMsg localMsg =
+    { decoder : Json.Decode.Decoder sharedMsg
+    , encoder : sharedMsg -> Json.Decode.Value
+    , onDecodeError : String -> localMsg
+    }
+
+
+type alias CloudModelOptions sharedModel sharedMsg =
+    { rejectionStrategy : RejectionStrategy sharedModel sharedMsg
     }
 
 
@@ -94,18 +114,31 @@ wrapAll :
             -> Sub (CloudMsg sharedMsg localMsg)
         , view : CloudModel sharedModel sharedMsg localModel -> Html (CloudMsg sharedMsg localMsg)
         }
-wrapAll { sharedMsgDecoder, sharedMsgEncoder, onDecodeError, init, updateCloud, rejectionStrategy, updateLocal, subscriptions, view, proposal, proposalResponse, receiveEvents } =
+wrapAll { application, options, ports, sharedMsgEncoding } =
+    let
+        { init, subscriptions, updateCloud, updateLocal, view } =
+            application
+
+        { rejectionStrategy } =
+            options
+
+        { proposal, proposalResponse, receiveEvents } =
+            ports
+
+        { decoder, encoder, onDecodeError } =
+            sharedMsgEncoding
+    in
     { init = buildInit init
     , update =
         buildCloudUpdate proposal
-            sharedMsgEncoder
+            encoder
             updateCloud
             updateLocal
             rejectionStrategy
     , subscriptions =
         buildSubscriptions proposalResponse
             receiveEvents
-            sharedMsgDecoder
+            decoder
             onDecodeError
             subscriptions
     , view = constructCloudView updateCloud view
@@ -222,11 +255,13 @@ type ControlMsg sharedMsg
 {-| If the client is ever behind the server, when it proposes a message for the event
 stream that message will be rejected. If that happens, we have to do something with
 any pending events that have not yet been accepted by the event stream. We have several options:
+
   - DropAllPending: Removes any pending events. The user will have to redo their actions
   - ReapplyAllPending: Replays all the pending events on top of the latest shared model.
   - Custom: If the simple strategies do not work for you, you can instead
-            examine the list of pending events and the latest shared model, and return
-            a new list of pending events.
+    examine the list of pending events and the latest shared model, and return
+    a new list of pending events.
+
 -}
 type RejectionStrategy sharedModel sharedMsg
     = DropAllPending
@@ -408,6 +443,7 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy co
                     }
             in
             applyRejectionStrategy rejectionStrategy model.pendingEvents proposal sharedMsgEncoder (clientId + 1) caughtUpModel
+
 
 {-| Helper method for proposing the next pending event, if one exists.
 -}
