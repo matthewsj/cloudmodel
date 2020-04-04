@@ -1,7 +1,7 @@
 module CloudModel exposing
     ( CloudModelConfig, element, wrapAll, RejectionStrategy(..)
     , localAction, sharedAction
-    , CloudModel, CloudMsg, LocalOriginAction
+    , ApplicationBase, CloudModel, CloudModelOptions, CloudModelPorts, CloudMsg, LocalOriginAction, SharedMsgEncoding, localOnlyTesting
     )
 
 {-| This module provides an abstraction for "shared-workspace" web applications where multiple
@@ -427,7 +427,8 @@ updateWithControlMsg proposal sharedMsgEncoder coreUpdateFn rejectionStrategy co
 
         Reject clientId unfilteredNewerEvents ->
             let
-                newerEvents = List.filter (\event -> event.id > model.latestKnownEventId) unfilteredNewerEvents
+                newerEvents =
+                    List.filter (\event -> event.id > model.latestKnownEventId) unfilteredNewerEvents
 
                 latest =
                     List.head (List.reverse newerEvents)
@@ -621,6 +622,74 @@ constructCloudView :
 constructCloudView updateFn viewFn model =
     viewFn (predictedSharedModel updateFn model.sharedModelInfo) model.localModel
         |> Html.map LocalOrigin
+
+
+
+-- LOCAL-ONLY TESTING
+
+
+{-| A version of `element` that can't actually sync with other clients, but
+doesn't require a server and doesn't require you to have already written all
+your encoders and decoders or to declare or wire up any ports to any JavaScript
+things. Useful as a simple local development tool. When you're developing, you
+can use this until you're ready to hook your program up to the network.
+-}
+localOnlyTesting :
+    ApplicationBase sharedModel localModel sharedMsg localMsg flags
+    -> Program flags (LocalOnlyCloudModel sharedModel localModel) (LocalOriginAction sharedMsg localMsg)
+localOnlyTesting { init, subscriptions, updateCloud, updateLocal, view } =
+    Browser.element
+        { init =
+            \flags ->
+                let
+                    ( initialClientSharedModel, initialClientLocalModel, cmd ) =
+                        init flags
+                in
+                ( { localModel = initialClientLocalModel
+                  , sharedModel = initialClientSharedModel
+                  }
+                , Cmd.map localAction cmd
+                )
+        , subscriptions = \{ sharedModel, localModel } -> Sub.map localAction (subscriptions sharedModel localModel)
+        , update = localOnlyUpdate updateCloud updateLocal
+        , view = \{ sharedModel, localModel } -> view sharedModel localModel
+        }
+
+
+{-| The model type used by local-only testing cloudmodel programs.
+-}
+type alias LocalOnlyCloudModel sharedModel localModel =
+    { sharedModel : sharedModel
+    , localModel : localModel
+    }
+
+
+{-| Wraps update functions for local-only testing cloudmodel programs.
+-}
+localOnlyUpdate :
+    (sharedMsg -> sharedModel -> sharedModel)
+    -> (localMsg -> localModel -> ( localModel, Cmd localMsg ))
+    -> LocalOriginAction sharedMsg localMsg
+    -> LocalOnlyCloudModel sharedModel localModel
+    -> ( LocalOnlyCloudModel sharedModel localModel, Cmd (LocalOriginAction sharedMsg localMsg) )
+localOnlyUpdate updateSharedFn updateLocalFn msg model =
+    let
+        ( newLocalModel, localCmd ) =
+            Maybe.map (\l -> updateLocalFn l model.localModel) msg.localMsg
+                |> Maybe.withDefault ( model.localModel, Cmd.none )
+
+        newSharedModel =
+            Maybe.map
+                (\s ->
+                    updateSharedFn s
+                        model.sharedModel
+                )
+                msg.proposedEvent
+                |> Maybe.withDefault model.sharedModel
+    in
+    ( { sharedModel = newSharedModel, localModel = newLocalModel }
+    , Cmd.map localAction localCmd
+    )
 
 
 
